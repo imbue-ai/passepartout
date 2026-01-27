@@ -6,7 +6,14 @@ interface Message {
   sender: 'user' | 'bot';
 }
 
-const FIXED_RESPONSE = "Thanks for your message! I'm a simple chat bot that always responds with this fixed message.";
+// Declare the electronAPI exposed by the preload script
+declare global {
+  interface Window {
+    electronAPI: {
+      sendMessage: (message: string) => Promise<string>;
+    };
+  }
+}
 
 function App() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -21,7 +28,7 @@ function App() {
     scrollToBottom();
   }, [messages]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputValue.trim()) return;
 
@@ -34,15 +41,23 @@ function App() {
     setMessages((prev) => [...prev, userMessage]);
     setInputValue('');
 
-    // Simulate bot response with a small delay
-    setTimeout(() => {
+    // Send message to main process via IPC and get response
+    try {
+      const response = await window.electronAPI.sendMessage(inputValue);
       const botMessage: Message = {
         id: Date.now() + 1,
-        text: FIXED_RESPONSE,
+        text: response,
         sender: 'bot',
       };
       setMessages((prev) => [...prev, botMessage]);
-    }, 500);
+    } catch (error) {
+      const errorMessage: Message = {
+        id: Date.now() + 1,
+        text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        sender: 'bot',
+      };
+      setMessages((prev) => [...prev, errorMessage]);
+    }
   };
 
   return (

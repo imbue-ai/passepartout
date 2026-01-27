@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
 
@@ -52,5 +52,9 @@ app.on('activate', () => {
   }
 });
 
-// In this file you can include the rest of your app's specific main process
-// code. You can also put them in separate files and import them here.
+// IPC Handler: Server-side message processing
+ipcMain.handle('chat:sendMessage', async (_event, message: string) => {
+  // Return a response containing the $PATH environment variable
+  const pathValue = process.env.PATH || 'PATH not available';
+  return `You said: "${message}". Here is your $PATH: ${pathValue}`;
+});
