@@ -91,31 +91,21 @@ ipcMain.handle('chat:sendMessage', async (_event, message: string) => {
   }
 
   try {
-    // Send the message to the OpenCode session
-    await opencodeClient.session.chat({
+    // Send the message to the OpenCode session and get the response
+    const response = await opencodeClient.session.prompt({
       path: { id: sessionId },
       body: {
         parts: [{ type: 'text', text: message }],
-        providerID: 'anthropic',
-        modelID: 'claude-sonnet-4-5-20250929',
+        model: {
+          providerID: 'anthropic',
+          modelID: 'claude-sonnet-4-5-20250929',
+        },
       },
     });
 
-    // Fetch the messages to get the assistant's response
-    const messagesResponse = await opencodeClient.session.messages({
-      path: { id: sessionId },
-    });
-
-    const messages = messagesResponse.data ?? [];
-
-    // Find the last assistant message
-    const lastAssistantMessage = [...messages]
-      .reverse()
-      .find((msg) => msg.role === 'assistant');
-
-    if (lastAssistantMessage && lastAssistantMessage.parts) {
+    if (response.data?.parts) {
       // Extract text parts from the response
-      const textParts = lastAssistantMessage.parts
+      const textParts = response.data.parts
         .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
         .map((part) => part.text);
 
