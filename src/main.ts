@@ -40,7 +40,7 @@ async function initOpencode() {
     console.log('Initializing OpenCode SDK with cwd:', cwd);
 
     const { client } = await createOpencode({
-      cwd,
+      port: 14096,
     });
 
     opencodeClient = client;
@@ -48,7 +48,10 @@ async function initOpencode() {
     // Create a session for the chat
     const session = await client.session.create({
       body: {
-        path: cwd,
+        title: 'Chat Session',
+      },
+      query: {
+        directory: cwd,
       },
     });
 
