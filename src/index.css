@@ -30,11 +30,44 @@ body {
   padding: 16px 20px;
   background-color: #4a90d9;
   color: white;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
 .chat-header h1 {
   font-size: 18px;
   font-weight: 500;
+}
+
+.model-selector {
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  background-color: rgba(255, 255, 255, 0.2);
+  color: white;
+  font-size: 14px;
+  cursor: pointer;
+  outline: none;
+  transition: background-color 0.2s;
+}
+
+.model-selector:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.3);
+}
+
+.model-selector:focus {
+  background-color: rgba(255, 255, 255, 0.3);
+}
+
+.model-selector:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.model-selector option {
+  background-color: #4a90d9;
+  color: white;
 }
 
 .messages-container {

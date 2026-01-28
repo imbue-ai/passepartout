@@ -9,6 +9,19 @@ export type StatusUpdate = {
   message?: string;
 };
 
+// Model configuration type
+export type ModelConfig = {
+  providerID: string;
+  modelID: string;
+};
+
+// Model option for the dropdown
+export type ModelOption = {
+  providerID: string;
+  modelID: string;
+  displayName: string;
+};
+
 // Expose a secure API to the renderer process
 contextBridge.exposeInMainWorld('electronAPI', {
   sendMessage: (message: string): Promise<string> => {
@@ -23,5 +36,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => {
       ipcRenderer.removeListener('chat:statusUpdate', handler);
     };
+  },
+  getAvailableModels: (): Promise<ModelOption[]> => {
+    return ipcRenderer.invoke('chat:getAvailableModels');
+  },
+  setModel: (model: ModelConfig): Promise<void> => {
+    return ipcRenderer.invoke('chat:setModel', model);
+  },
+  getCurrentModel: (): Promise<ModelConfig> => {
+    return ipcRenderer.invoke('chat:getCurrentModel');
   },
 });

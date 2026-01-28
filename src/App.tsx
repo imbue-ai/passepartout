@@ -12,12 +12,26 @@ type StatusUpdate = {
   message?: string;
 };
 
+type ModelConfig = {
+  providerID: string;
+  modelID: string;
+};
+
+type ModelOption = {
+  providerID: string;
+  modelID: string;
+  displayName: string;
+};
+
 // Declare the electronAPI exposed by the preload script
 declare global {
   interface Window {
     electronAPI: {
       sendMessage: (message: string) => Promise<string>;
       onStatusUpdate: (callback: (status: StatusUpdate) => void) => () => void;
+      getAvailableModels: () => Promise<ModelOption[]>;
+      setModel: (model: ModelConfig) => Promise<void>;
+      getCurrentModel: () => Promise<ModelConfig>;
     };
   }
 }
@@ -27,6 +41,8 @@ function App() {
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string>('');
+  const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
+  const [selectedModel, setSelectedModel] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -36,6 +52,19 @@ function App() {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Load available models and current model on mount
+  useEffect(() => {
+    const loadModels = async () => {
+      const models = await window.electronAPI.getAvailableModels();
+      setAvailableModels(models);
+
+      const currentModel = await window.electronAPI.getCurrentModel();
+      // Create a unique key for the current model
+      setSelectedModel(`${currentModel.providerID}:${currentModel.modelID}`);
+    };
+    loadModels();
+  }, []);
 
   // Subscribe to status updates from the main process
   useEffect(() => {
@@ -50,6 +79,14 @@ function App() {
     });
     return cleanup;
   }, []);
+
+  const handleModelChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = e.target.value;
+    setSelectedModel(value);
+
+    const [providerID, modelID] = value.split(':');
+    await window.electronAPI.setModel({ providerID, modelID });
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -92,6 +129,21 @@ function App() {
     <div className="chat-container">
       <div className="chat-header">
         <h1>Chat</h1>
+        <select
+          className="model-selector"
+          value={selectedModel}
+          onChange={handleModelChange}
+          disabled={isLoading}
+        >
+          {availableModels.map((model) => (
+            <option
+              key={`${model.providerID}:${model.modelID}`}
+              value={`${model.providerID}:${model.modelID}`}
+            >
+              {model.displayName}
+            </option>
+          ))}
+        </select>
       </div>
       <div className="messages-container">
         {messages.length === 0 && (
