@@ -2,10 +2,11 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
 import { createOpencode } from '@opencode-ai/sdk';
-import type { Client as OpencodeClient } from '@opencode-ai/sdk';
+import type { OpencodeClient } from '@opencode-ai/sdk';
 
 // OpenCode SDK client and session state
 let opencodeClient: OpencodeClient | null = null;
+let closeOpencodeServer: (() => void) | null = null;
 let sessionId: string | null = null;
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
@@ -13,15 +14,10 @@ if (started) {
   app.quit();
 }
 
-const fixupPath = () => {
-  if (app.isPackaged) {
-    const binPath = path.join(process.resourcesPath, 'bin');
-    process.env.PATH = `${binPath}:${process.env.PATH}`;
-  } else {
-    // TODO: Make this platform-agnostic
-    const binPath = path.resolve(__dirname, 'node_modules/opencode-darwin-arm64/bin');
-    process.env.PATH = `${binPath}:${process.env.PATH}`;
-  }
+const fixupPathEnvs = () => {
+  const nativeToolsPath = app.isPackaged ? path.join(process.resourcesPath, 'native_tools') : path.resolve(__dirname, '../../native_tools');
+  process.env.PATH = `${nativeToolsPath}:${process.env.PATH}`;
+  process.env.PLAYWRIGHT_BROWSERS_PATH = path.join(nativeToolsPath, 'playwright_browsers');
 }
 
 const createWindow = () => {
@@ -50,11 +46,14 @@ async function initOpencode() {
     const cwd = process.cwd();
     console.log('Initializing OpenCode SDK with cwd:', cwd);
 
-    const { client } = await createOpencode({
+    const { client, server } = await createOpencode({
       port: 14096,
     });
 
     opencodeClient = client;
+    closeOpencodeServer = server.close;
+    console.log('XXX opencode server url', server.url);
+    console.log('XXX opencode server close', server.close);
 
     // Create a session for the chat
     const session = await client.session.create({
@@ -77,7 +76,7 @@ async function initOpencode() {
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.on('ready', async () => {
-  fixupPath();
+  fixupPathEnvs();
   await initOpencode();
   createWindow();
 });
@@ -88,6 +87,14 @@ app.on('ready', async () => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
+  }
+});
+
+app.on('will-quit', () => {
+  console.log('XXX will-quit');
+  if (closeOpencodeServer) {
+    console.log('XXX closing opencode server');
+    closeOpencodeServer();
   }
 });
 

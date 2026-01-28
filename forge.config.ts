@@ -10,7 +10,7 @@ const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
     // TODO: Make this platform-agnostic
-    extraResource: [path.resolve(__dirname, 'node_modules/opencode-darwin-arm64/bin')],
+    extraResource: [path.resolve(__dirname, 'native_tools')],
   },
   rebuildConfig: {},
   makers: [
