@@ -7,45 +7,11 @@ import type { OpencodeClient, Event, Part, ToolPart } from '@opencode-ai/sdk';
 import getPort from 'get-port';
 import crypto from 'node:crypto';
 
-// Model configuration types
-type ModelConfig = {
-  providerID: string;
-  modelID: string;
-};
-
-type ModelOption = {
-  providerID: string;
-  modelID: string;
-  displayName: string;
-};
-
-// Available models configuration
-const availableModels: ModelOption[] = [
-  // Anthropic models
-  { providerID: 'anthropic', modelID: 'claude-sonnet-4-5-20250929', displayName: 'Claude Sonnet 4.5' },
-  { providerID: 'anthropic', modelID: 'claude-opus-4-20250514', displayName: 'Claude Opus 4' },
-  { providerID: 'anthropic', modelID: 'claude-3-5-haiku-20241022', displayName: 'Claude 3.5 Haiku' },
-  // OpenAI models
-  { providerID: 'openai', modelID: 'gpt-4o', displayName: 'GPT-4o' },
-  { providerID: 'openai', modelID: 'gpt-4o-mini', displayName: 'GPT-4o Mini' },
-  { providerID: 'openai', modelID: 'o1', displayName: 'OpenAI o1' },
-  { providerID: 'openai', modelID: 'o3-mini', displayName: 'OpenAI o3-mini' },
-  // Google models
-  { providerID: 'google', modelID: 'gemini-2.5-pro', displayName: 'Gemini 2.5 Pro' },
-  { providerID: 'google', modelID: 'gemini-2.5-flash', displayName: 'Gemini 2.5 Flash' },
-];
-
 // OpenCode SDK client and session state
 let opencodeClient: OpencodeClient | null = null;
 let closeOpencodeServer: (() => void) | null = null;
 let sessionId: string | null = null;
 let mainWindow: BrowserWindow | null = null;
-
-// Current selected model (default to Claude Sonnet 4.5)
-let currentModel: ModelConfig = {
-  providerID: 'anthropic',
-  modelID: 'claude-sonnet-4-5-20250929',
-};
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
@@ -241,24 +207,8 @@ app.on('activate', () => {
   }
 });
 
-// IPC Handler: Get available models
-ipcMain.handle('chat:getAvailableModels', () => {
-  return availableModels;
-});
-
-// IPC Handler: Set the current model
-ipcMain.handle('chat:setModel', (_event, model: ModelConfig) => {
-  currentModel = model;
-  console.log('Model changed to:', model.providerID, model.modelID);
-});
-
-// IPC Handler: Get the current model
-ipcMain.handle('chat:getCurrentModel', () => {
-  return currentModel;
-});
-
 // IPC Handler: Server-side message processing using OpenCode SDK
-ipcMain.handle('chat:sendMessage', async (_event, message: string) => {
+ipcMain.handle('chat:sendMessage', async (_event, message: string, providerID: string, modelID: string) => {
   if (!opencodeClient || !sessionId) {
     return 'Error: OpenCode SDK not initialized. Please restart the app.';
   }
@@ -269,7 +219,10 @@ ipcMain.handle('chat:sendMessage', async (_event, message: string) => {
       path: { id: sessionId },
       body: {
         parts: [{ type: 'text', text: message }],
-        model: currentModel,
+        model: {
+          providerID,
+          modelID,
+        },
       },
     });
 

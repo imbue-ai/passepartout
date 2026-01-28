@@ -12,26 +12,37 @@ type StatusUpdate = {
   message?: string;
 };
 
-type ModelConfig = {
-  providerID: string;
-  modelID: string;
-};
-
 type ModelOption = {
   providerID: string;
   modelID: string;
   displayName: string;
 };
 
+// Available models configuration
+const availableModels: ModelOption[] = [
+  // Anthropic models
+  { providerID: 'anthropic', modelID: 'claude-sonnet-4-5-20250929', displayName: 'Claude Sonnet 4.5' },
+  { providerID: 'anthropic', modelID: 'claude-opus-4-20250514', displayName: 'Claude Opus 4' },
+  { providerID: 'anthropic', modelID: 'claude-3-5-haiku-20241022', displayName: 'Claude 3.5 Haiku' },
+  // OpenAI models
+  { providerID: 'openai', modelID: 'gpt-4o', displayName: 'GPT-4o' },
+  { providerID: 'openai', modelID: 'gpt-4o-mini', displayName: 'GPT-4o Mini' },
+  { providerID: 'openai', modelID: 'o1', displayName: 'OpenAI o1' },
+  { providerID: 'openai', modelID: 'o3-mini', displayName: 'OpenAI o3-mini' },
+  // Google models
+  { providerID: 'google', modelID: 'gemini-2.5-pro', displayName: 'Gemini 2.5 Pro' },
+  { providerID: 'google', modelID: 'gemini-2.5-flash', displayName: 'Gemini 2.5 Flash' },
+];
+
+// Default model
+const defaultModel = availableModels[0];
+
 // Declare the electronAPI exposed by the preload script
 declare global {
   interface Window {
     electronAPI: {
-      sendMessage: (message: string) => Promise<string>;
+      sendMessage: (message: string, providerID: string, modelID: string) => Promise<string>;
       onStatusUpdate: (callback: (status: StatusUpdate) => void) => () => void;
-      getAvailableModels: () => Promise<ModelOption[]>;
-      setModel: (model: ModelConfig) => Promise<void>;
-      getCurrentModel: () => Promise<ModelConfig>;
     };
   }
 }
@@ -41,8 +52,7 @@ function App() {
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string>('');
-  const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
-  const [selectedModel, setSelectedModel] = useState<string>('');
+  const [selectedModel, setSelectedModel] = useState<ModelOption>(defaultModel);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -52,19 +62,6 @@ function App() {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
-
-  // Load available models and current model on mount
-  useEffect(() => {
-    const loadModels = async () => {
-      const models = await window.electronAPI.getAvailableModels();
-      setAvailableModels(models);
-
-      const currentModel = await window.electronAPI.getCurrentModel();
-      // Create a unique key for the current model
-      setSelectedModel(`${currentModel.providerID}:${currentModel.modelID}`);
-    };
-    loadModels();
-  }, []);
 
   // Subscribe to status updates from the main process
   useEffect(() => {
@@ -80,12 +77,13 @@ function App() {
     return cleanup;
   }, []);
 
-  const handleModelChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
+  const handleModelChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const value = e.target.value;
-    setSelectedModel(value);
-
     const [providerID, modelID] = value.split(':');
-    await window.electronAPI.setModel({ providerID, modelID });
+    const model = availableModels.find(m => m.providerID === providerID && m.modelID === modelID);
+    if (model) {
+      setSelectedModel(model);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -105,7 +103,7 @@ function App() {
 
     // Send message to main process via IPC and get response
     try {
-      const response = await window.electronAPI.sendMessage(inputValue);
+      const response = await window.electronAPI.sendMessage(inputValue, selectedModel.providerID, selectedModel.modelID);
       const botMessage: Message = {
         id: Date.now() + 1,
         text: response,
@@ -131,7 +129,7 @@ function App() {
         <h1>Chat</h1>
         <select
           className="model-selector"
-          value={selectedModel}
+          value={`${selectedModel.providerID}:${selectedModel.modelID}`}
           onChange={handleModelChange}
           disabled={isLoading}
         >
