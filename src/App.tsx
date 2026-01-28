@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import Markdown from 'react-markdown';
 
 interface Message {
   id: number;
@@ -103,7 +104,11 @@ function App() {
             key={message.id}
             className={`message ${message.sender === 'user' ? 'user-message' : 'bot-message'}`}
           >
-            {message.text}
+            {message.sender === 'bot' ? (
+              <Markdown>{message.text}</Markdown>
+            ) : (
+              message.text
+            )}
           </div>
         ))}
         {isLoading && (
