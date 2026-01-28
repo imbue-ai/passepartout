@@ -1,9 +1,11 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
-import { createOpencode } from '@opencode-ai/sdk';
+import { createOpencodeServer } from '@opencode-ai/sdk/server';
+import { createOpencodeClient } from '@opencode-ai/sdk/client';
 import type { OpencodeClient, Event, Part, ToolPart } from '@opencode-ai/sdk';
 import getPort from 'get-port';
+import crypto from 'node:crypto';
 
 // OpenCode SDK client and session state
 let opencodeClient: OpencodeClient | null = null;
@@ -136,8 +138,22 @@ async function initOpencode() {
     const cwd = process.cwd();
     console.log('Initializing OpenCode SDK with cwd:', cwd);
 
-    const { client, server } = await createOpencode({
+    const username = 'passepartout';
+    const password = crypto.randomBytes(32).toString('hex');
+    process.env.OPENCODE_SERVER_USERNAME = username;
+    process.env.OPENCODE_SERVER_PASSWORD = password;
+    const server = await createOpencodeServer({
       port: await getPort(),
+    });
+    process.env.OPENCODE_SERVER_USERNAME = '';
+    process.env.OPENCODE_SERVER_PASSWORD = '';
+
+    const basicAuth = Buffer.from(`${username}:${password}`).toString('base64');
+    const client = await createOpencodeClient({
+      baseUrl: server.url,
+      headers: {
+        'Authorization': `Basic ${basicAuth}`,
+      }
     });
 
     opencodeClient = client;
