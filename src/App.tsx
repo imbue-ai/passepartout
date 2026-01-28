@@ -261,21 +261,41 @@ function App() {
     // Send message to main process via IPC and get response
     try {
       const response = await window.electronAPI.sendMessage(inputValue, selectedModel.providerID, selectedModel.modelID);
+      const botMessageId = Date.now() + 1;
       const botMessage: Message = {
-        id: Date.now() + 1,
+        id: botMessageId,
         text: response,
         sender: 'bot',
         executionLog: executionLogRef.current.length > 0 ? [...executionLogRef.current] : undefined,
       };
       setMessages((prev) => [...prev, botMessage]);
+      // Transfer expanded state from loading (-1) to the new message
+      setExpandedLogs((prev) => {
+        const next = new Set(prev);
+        if (next.has(-1)) {
+          next.delete(-1);
+          next.add(botMessageId);
+        }
+        return next;
+      });
     } catch (error) {
+      const errorMessageId = Date.now() + 1;
       const errorMessage: Message = {
-        id: Date.now() + 1,
+        id: errorMessageId,
         text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
         sender: 'bot',
         executionLog: executionLogRef.current.length > 0 ? [...executionLogRef.current] : undefined,
       };
       setMessages((prev) => [...prev, errorMessage]);
+      // Transfer expanded state from loading (-1) to the new message
+      setExpandedLogs((prev) => {
+        const next = new Set(prev);
+        if (next.has(-1)) {
+          next.delete(-1);
+          next.add(errorMessageId);
+        }
+        return next;
+      });
     } finally {
       setIsLoading(false);
       setStatusMessage('');
