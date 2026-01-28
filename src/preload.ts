@@ -5,12 +5,17 @@ import { contextBridge, ipcRenderer } from 'electron';
 
 // Status update type
 export type StatusUpdate = {
-  type: 'idle' | 'busy' | 'tool' | 'reasoning' | 'generating' | 'retry';
+  type: 'idle' | 'busy' | 'tool' | 'tool-completed' | 'tool-error' | 'reasoning' | 'generating' | 'retry';
   message?: string;
   // Additional details for the execution log
   details?: {
     toolName?: string;
     timestamp: number;
+    // Tool-specific details
+    input?: Record<string, unknown>;
+    output?: string;
+    error?: string;
+    duration?: number; // in milliseconds
   };
 };
 

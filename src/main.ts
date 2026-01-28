@@ -44,8 +44,18 @@ const createWindow = () => {
   }
 };
 
+// Status update type for the renderer
+type StatusUpdateDetails = {
+  toolName?: string;
+  timestamp: number;
+  input?: Record<string, unknown>;
+  output?: string;
+  error?: string;
+  duration?: number;
+};
+
 // Helper to send status updates to the renderer
-function sendStatusUpdate(status: { type: string; message?: string; details?: { toolName?: string; timestamp: number } }) {
+function sendStatusUpdate(status: { type: string; message?: string; details?: StatusUpdateDetails }) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('chat:statusUpdate', status);
   }
@@ -69,6 +79,64 @@ function getToolDescription(toolName: string, title?: string): string {
     'web_fetch': 'Fetching webpage',
   };
   return toolDescriptions[toolName.toLowerCase()] || `Running ${toolName}`;
+}
+
+// Helper to format tool input for display
+function formatToolInput(toolName: string, input?: Record<string, unknown>): string {
+  if (!input) return '';
+
+  const tool = toolName.toLowerCase();
+
+  // Extract the most relevant input field based on tool type
+  if (tool === 'read' || tool === 'write' || tool === 'edit') {
+    const filePath = input.file_path || input.path || input.filename;
+    if (filePath && typeof filePath === 'string') {
+      // Show just the filename for brevity
+      const parts = filePath.split('/');
+      return parts[parts.length - 1];
+    }
+  } else if (tool === 'bash') {
+    const command = input.command;
+    if (command && typeof command === 'string') {
+      // Truncate long commands
+      return command.length > 50 ? command.substring(0, 47) + '...' : command;
+    }
+  } else if (tool === 'glob') {
+    const pattern = input.pattern;
+    if (pattern && typeof pattern === 'string') {
+      return pattern;
+    }
+  } else if (tool === 'grep') {
+    const pattern = input.pattern;
+    if (pattern && typeof pattern === 'string') {
+      return `"${pattern.length > 30 ? pattern.substring(0, 27) + '...' : pattern}"`;
+    }
+  } else if (tool === 'web_search') {
+    const query = input.query;
+    if (query && typeof query === 'string') {
+      return `"${query.length > 40 ? query.substring(0, 37) + '...' : query}"`;
+    }
+  } else if (tool === 'web_fetch') {
+    const url = input.url;
+    if (url && typeof url === 'string') {
+      // Show just the domain for brevity
+      try {
+        const urlObj = new URL(url);
+        return urlObj.hostname;
+      } catch {
+        return url.length > 40 ? url.substring(0, 37) + '...' : url;
+      }
+    }
+  }
+
+  return '';
+}
+
+// Helper to truncate output for display
+function truncateOutput(output?: string): string | undefined {
+  if (!output) return undefined;
+  if (output.length <= 100) return output;
+  return output.substring(0, 97) + '...';
 }
 
 // Subscribe to OpenCode events for real-time status updates
@@ -114,12 +182,53 @@ async function subscribeToEvents() {
           if (part?.sessionID === sessionId) {
             if (part.type === 'tool') {
               const toolPart = part as ToolPart;
-              if (toolPart.state?.status === 'running') {
-                const description = getToolDescription(toolPart.tool, toolPart.state.title);
+              const state = toolPart.state;
+
+              if (state?.status === 'running') {
+                const description = getToolDescription(toolPart.tool, state.title);
+                // Extract useful input details
+                const input = state.input as Record<string, unknown> | undefined;
+                const inputSummary = formatToolInput(toolPart.tool, input);
+
                 sendStatusUpdate({
                   type: 'tool',
-                  message: description,
-                  details: { toolName: toolPart.tool, timestamp: Date.now() }
+                  message: inputSummary ? `${description}: ${inputSummary}` : description,
+                  details: {
+                    toolName: toolPart.tool,
+                    timestamp: Date.now(),
+                    input: input,
+                  }
+                });
+              } else if (state?.status === 'completed') {
+                const duration = state.time?.end && state.time?.start
+                  ? state.time.end - state.time.start
+                  : undefined;
+                const description = getToolDescription(toolPart.tool, state.title);
+
+                sendStatusUpdate({
+                  type: 'tool-completed',
+                  message: `${description} completed`,
+                  details: {
+                    toolName: toolPart.tool,
+                    timestamp: Date.now(),
+                    output: truncateOutput(state.output),
+                    duration,
+                  }
+                });
+              } else if (state?.status === 'error') {
+                const duration = state.time?.end && state.time?.start
+                  ? state.time.end - state.time.start
+                  : undefined;
+
+                sendStatusUpdate({
+                  type: 'tool-error',
+                  message: `Error: ${state.error}`,
+                  details: {
+                    toolName: toolPart.tool,
+                    timestamp: Date.now(),
+                    error: state.error,
+                    duration,
+                  }
                 });
               }
             } else if (part.type === 'reasoning') {

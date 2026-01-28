@@ -133,7 +133,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-width: 85%;
+  max-width: 70%; /* Match bot-message max-width */
 }
 
 /* Loading indicator styles */
@@ -374,4 +374,25 @@ body {
 
 .log-entry-retry {
   background-color: #fef2f2;
+}
+
+.log-entry-tool-completed {
+  background-color: #ecfdf5;
+}
+
+.log-entry-tool-completed .log-icon {
+  color: #10b981;
+}
+
+.log-entry-tool-error {
+  background-color: #fef2f2;
+}
+
+.log-entry-tool-error .log-icon {
+  color: #ef4444;
+}
+
+.log-duration {
+  color: #888;
+  font-size: 11px;
 }

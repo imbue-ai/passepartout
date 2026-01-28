@@ -8,11 +8,15 @@ interface Message {
 }
 
 type StatusUpdate = {
-  type: 'idle' | 'busy' | 'tool' | 'reasoning' | 'generating' | 'retry';
+  type: 'idle' | 'busy' | 'tool' | 'tool-completed' | 'tool-error' | 'reasoning' | 'generating' | 'retry';
   message?: string;
   details?: {
     toolName?: string;
     timestamp: number;
+    input?: Record<string, unknown>;
+    output?: string;
+    error?: string;
+    duration?: number;
   };
 };
 
@@ -22,6 +26,9 @@ interface ExecutionLogEntry {
   message: string;
   timestamp: number;
   toolName?: string;
+  duration?: number;
+  output?: string;
+  error?: string;
 }
 
 // Declare the electronAPI exposed by the preload script
@@ -58,11 +65,19 @@ function App() {
     switch (type) {
       case 'busy': return '⏳';
       case 'tool': return '🔧';
+      case 'tool-completed': return '✓';
+      case 'tool-error': return '✗';
       case 'reasoning': return '💭';
       case 'generating': return '✍️';
       case 'retry': return '🔄';
       default: return '•';
     }
+  };
+
+  // Format duration for display
+  const formatDuration = (ms: number): string => {
+    if (ms < 1000) return `${ms}ms`;
+    return `${(ms / 1000).toFixed(1)}s`;
   };
 
   useEffect(() => {
@@ -82,11 +97,14 @@ function App() {
         // Add entry to execution log (only for non-idle statuses)
         if (status.message && status.details?.timestamp) {
           const newEntry: ExecutionLogEntry = {
-            id: status.details.timestamp,
+            id: status.details.timestamp + Math.random(), // Ensure unique IDs
             type: status.type,
             message: status.message,
             timestamp: status.details.timestamp,
             toolName: status.details.toolName,
+            duration: status.details.duration,
+            output: status.details.output,
+            error: status.details.error,
           };
           setExecutionLog((prev) => [...prev, newEntry]);
         }
@@ -181,7 +199,12 @@ function App() {
                       <div key={entry.id} className={`log-entry log-entry-${entry.type}`}>
                         <span className="log-icon">{getLogIcon(entry.type)}</span>
                         <span className="log-time">{formatTime(entry.timestamp)}</span>
-                        <span className="log-message">{entry.message}</span>
+                        <span className="log-message">
+                          {entry.message}
+                          {entry.duration !== undefined && (
+                            <span className="log-duration"> ({formatDuration(entry.duration)})</span>
+                          )}
+                        </span>
                       </div>
                     ))}
                   </div>
