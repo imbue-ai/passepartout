@@ -1,12 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import Markdown from 'react-markdown';
 
-interface Message {
-  id: number;
-  text: string;
-  sender: 'user' | 'bot';
-}
-
 type StatusUpdate = {
   type: 'idle' | 'busy' | 'tool' | 'tool-completed' | 'tool-error' | 'reasoning' | 'generating' | 'retry';
   message?: string;
@@ -31,6 +25,13 @@ interface ExecutionLogEntry {
   error?: string;
 }
 
+interface Message {
+  id: number;
+  text: string;
+  sender: 'user' | 'bot';
+  executionLog?: ExecutionLogEntry[];
+}
+
 // Declare the electronAPI exposed by the preload script
 declare global {
   interface Window {
@@ -41,14 +42,23 @@ declare global {
   }
 }
 
+// Monotonically increasing counter for unique IDs
+let nextLogEntryId = 0;
+
 function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string>('');
   const [executionLog, setExecutionLog] = useState<ExecutionLogEntry[]>([]);
-  const [isLogExpanded, setIsLogExpanded] = useState(false);
+  const [expandedLogs, setExpandedLogs] = useState<Set<number>>(new Set());
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const executionLogRef = useRef<ExecutionLogEntry[]>([]);
+
+  // Keep ref in sync with state for use in async handlers
+  useEffect(() => {
+    executionLogRef.current = executionLog;
+  }, [executionLog]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -80,6 +90,19 @@ function App() {
     return `${(ms / 1000).toFixed(1)}s`;
   };
 
+  // Toggle expansion state for a message's execution log
+  const toggleLogExpanded = (messageId: number) => {
+    setExpandedLogs((prev) => {
+      const next = new Set(prev);
+      if (next.has(messageId)) {
+        next.delete(messageId);
+      } else {
+        next.add(messageId);
+      }
+      return next;
+    });
+  };
+
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
@@ -97,7 +120,7 @@ function App() {
         // Add entry to execution log (only for non-idle statuses)
         if (status.message && status.details?.timestamp) {
           const newEntry: ExecutionLogEntry = {
-            id: status.details.timestamp + Math.random(), // Ensure unique IDs
+            id: nextLogEntryId++,
             type: status.type,
             message: status.message,
             timestamp: status.details.timestamp,
@@ -128,7 +151,6 @@ function App() {
     setIsLoading(true);
     setStatusMessage('Thinking...');
     setExecutionLog([]); // Clear execution log for new request
-    setIsLogExpanded(false); // Collapse log by default
 
     // Send message to main process via IPC and get response
     try {
@@ -137,6 +159,7 @@ function App() {
         id: Date.now() + 1,
         text: response,
         sender: 'bot',
+        executionLog: executionLogRef.current.length > 0 ? [...executionLogRef.current] : undefined,
       };
       setMessages((prev) => [...prev, botMessage]);
     } catch (error) {
@@ -144,6 +167,7 @@ function App() {
         id: Date.now() + 1,
         text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
         sender: 'bot',
+        executionLog: executionLogRef.current.length > 0 ? [...executionLogRef.current] : undefined,
       };
       setMessages((prev) => [...prev, errorMessage]);
     } finally {
@@ -152,66 +176,80 @@ function App() {
     }
   };
 
+  // Render execution log component
+  const renderExecutionLog = (log: ExecutionLogEntry[], messageId: number, isCurrentLoading: boolean) => {
+    if (log.length === 0) return null;
+
+    const isExpanded = isCurrentLoading ? expandedLogs.has(-1) : expandedLogs.has(messageId);
+    const toggleId = isCurrentLoading ? -1 : messageId;
+
+    return (
+      <div className="execution-log">
+        <button
+          className="execution-log-toggle"
+          onClick={() => toggleLogExpanded(toggleId)}
+          type="button"
+        >
+          <span className="toggle-icon">{isExpanded ? '▼' : '▶'}</span>
+          <span className="toggle-text">
+            Execution log ({log.length} {log.length === 1 ? 'step' : 'steps'})
+          </span>
+        </button>
+        {isExpanded && (
+          <div className="execution-log-entries">
+            {log.map((entry) => (
+              <div key={entry.id} className={`log-entry log-entry-${entry.type}`}>
+                <span className="log-icon">{getLogIcon(entry.type)}</span>
+                <span className="log-time">{formatTime(entry.timestamp)}</span>
+                <span className="log-message">
+                  {entry.message}
+                  {entry.duration !== undefined && (
+                    <span className="log-duration"> ({formatDuration(entry.duration)})</span>
+                  )}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="chat-container">
       <div className="chat-header">
         <h1>Chat</h1>
       </div>
       <div className="messages-container">
-        {messages.length === 0 && (
+        {messages.length === 0 && !isLoading && (
           <div className="empty-state">
             Start a conversation by typing a message below.
           </div>
         )}
         {messages.map((message) => (
-          <div
-            key={message.id}
-            className={`message ${message.sender === 'user' ? 'user-message' : 'bot-message'}`}
-          >
-            {message.sender === 'bot' ? (
-              <Markdown>{message.text}</Markdown>
-            ) : (
-              message.text
+          <React.Fragment key={message.id}>
+            <div
+              className={`message ${message.sender === 'user' ? 'user-message' : 'bot-message'}`}
+            >
+              {message.sender === 'bot' ? (
+                <Markdown>{message.text}</Markdown>
+              ) : (
+                message.text
+              )}
+            </div>
+            {message.sender === 'bot' && message.executionLog && (
+              renderExecutionLog(message.executionLog, message.id, false)
             )}
-          </div>
+          </React.Fragment>
         ))}
         {isLoading && (
-          <div className="loading-container">
+          <>
             <div className="loading-indicator">
               <div className="loading-spinner" />
               <span className="loading-text">{statusMessage}</span>
             </div>
-            {executionLog.length > 0 && (
-              <div className="execution-log">
-                <button
-                  className="execution-log-toggle"
-                  onClick={() => setIsLogExpanded(!isLogExpanded)}
-                  type="button"
-                >
-                  <span className="toggle-icon">{isLogExpanded ? '▼' : '▶'}</span>
-                  <span className="toggle-text">
-                    Execution log ({executionLog.length} {executionLog.length === 1 ? 'step' : 'steps'})
-                  </span>
-                </button>
-                {isLogExpanded && (
-                  <div className="execution-log-entries">
-                    {executionLog.map((entry) => (
-                      <div key={entry.id} className={`log-entry log-entry-${entry.type}`}>
-                        <span className="log-icon">{getLogIcon(entry.type)}</span>
-                        <span className="log-time">{formatTime(entry.timestamp)}</span>
-                        <span className="log-message">
-                          {entry.message}
-                          {entry.duration !== undefined && (
-                            <span className="log-duration"> ({formatDuration(entry.duration)})</span>
-                          )}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+            {renderExecutionLog(executionLog, -1, true)}
+          </>
         )}
         <div ref={messagesEndRef} />
       </div>
