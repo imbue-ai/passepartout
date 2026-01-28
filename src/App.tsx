@@ -21,17 +21,17 @@ type ModelOption = {
 // Available models configuration
 const availableModels: ModelOption[] = [
   // Anthropic models
+  { providerID: 'anthropic', modelID: 'claude-opus-4-5-20251101', displayName: 'Claude Opus 4.5' },
   { providerID: 'anthropic', modelID: 'claude-sonnet-4-5-20250929', displayName: 'Claude Sonnet 4.5' },
-  { providerID: 'anthropic', modelID: 'claude-opus-4-20250514', displayName: 'Claude Opus 4' },
-  { providerID: 'anthropic', modelID: 'claude-3-5-haiku-20241022', displayName: 'Claude 3.5 Haiku' },
+  { providerID: 'anthropic', modelID: 'claude-haiku-4-5-20251017', displayName: 'Claude Haiku 4.5' },
   // OpenAI models
-  { providerID: 'openai', modelID: 'gpt-4o', displayName: 'GPT-4o' },
-  { providerID: 'openai', modelID: 'gpt-4o-mini', displayName: 'GPT-4o Mini' },
-  { providerID: 'openai', modelID: 'o1', displayName: 'OpenAI o1' },
-  { providerID: 'openai', modelID: 'o3-mini', displayName: 'OpenAI o3-mini' },
+  { providerID: 'openai', modelID: 'o3', displayName: 'OpenAI o3' },
+  { providerID: 'openai', modelID: 'o4-mini', displayName: 'OpenAI o4-mini' },
+  { providerID: 'openai', modelID: 'gpt-4.1', displayName: 'GPT-4.1' },
+  { providerID: 'openai', modelID: 'gpt-4.1-mini', displayName: 'GPT-4.1 Mini' },
   // Google models
-  { providerID: 'google', modelID: 'gemini-2.5-pro', displayName: 'Gemini 2.5 Pro' },
-  { providerID: 'google', modelID: 'gemini-2.5-flash', displayName: 'Gemini 2.5 Flash' },
+  { providerID: 'google', modelID: 'gemini-3-pro', displayName: 'Gemini 3 Pro' },
+  { providerID: 'google', modelID: 'gemini-3-flash', displayName: 'Gemini 3 Flash' },
 ];
 
 // Default model
