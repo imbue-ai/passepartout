@@ -10,7 +10,19 @@ interface Message {
 type StatusUpdate = {
   type: 'idle' | 'busy' | 'tool' | 'reasoning' | 'generating' | 'retry';
   message?: string;
+  details?: {
+    toolName?: string;
+    timestamp: number;
+  };
 };
+
+interface ExecutionLogEntry {
+  id: number;
+  type: StatusUpdate['type'];
+  message: string;
+  timestamp: number;
+  toolName?: string;
+}
 
 // Declare the electronAPI exposed by the preload script
 declare global {
@@ -27,10 +39,30 @@ function App() {
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string>('');
+  const [executionLog, setExecutionLog] = useState<ExecutionLogEntry[]>([]);
+  const [isLogExpanded, setIsLogExpanded] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  // Format timestamp for execution log display
+  const formatTime = (timestamp: number): string => {
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  };
+
+  // Get icon for execution log entry type
+  const getLogIcon = (type: StatusUpdate['type']): string => {
+    switch (type) {
+      case 'busy': return '⏳';
+      case 'tool': return '🔧';
+      case 'reasoning': return '💭';
+      case 'generating': return '✍️';
+      case 'retry': return '🔄';
+      default: return '•';
+    }
   };
 
   useEffect(() => {
@@ -46,6 +78,18 @@ function App() {
       } else {
         setIsLoading(true);
         setStatusMessage(status.message || 'Working...');
+
+        // Add entry to execution log (only for non-idle statuses)
+        if (status.message && status.details?.timestamp) {
+          const newEntry: ExecutionLogEntry = {
+            id: status.details.timestamp,
+            type: status.type,
+            message: status.message,
+            timestamp: status.details.timestamp,
+            toolName: status.details.toolName,
+          };
+          setExecutionLog((prev) => [...prev, newEntry]);
+        }
       }
     });
     return cleanup;
@@ -65,6 +109,8 @@ function App() {
     setInputValue('');
     setIsLoading(true);
     setStatusMessage('Thinking...');
+    setExecutionLog([]); // Clear execution log for new request
+    setIsLogExpanded(false); // Collapse log by default
 
     // Send message to main process via IPC and get response
     try {
@@ -112,9 +158,36 @@ function App() {
           </div>
         ))}
         {isLoading && (
-          <div className="loading-indicator">
-            <div className="loading-spinner" />
-            <span className="loading-text">{statusMessage}</span>
+          <div className="loading-container">
+            <div className="loading-indicator">
+              <div className="loading-spinner" />
+              <span className="loading-text">{statusMessage}</span>
+            </div>
+            {executionLog.length > 0 && (
+              <div className="execution-log">
+                <button
+                  className="execution-log-toggle"
+                  onClick={() => setIsLogExpanded(!isLogExpanded)}
+                  type="button"
+                >
+                  <span className="toggle-icon">{isLogExpanded ? '▼' : '▶'}</span>
+                  <span className="toggle-text">
+                    Execution log ({executionLog.length} {executionLog.length === 1 ? 'step' : 'steps'})
+                  </span>
+                </button>
+                {isLogExpanded && (
+                  <div className="execution-log-entries">
+                    {executionLog.map((entry) => (
+                      <div key={entry.id} className={`log-entry log-entry-${entry.type}`}>
+                        <span className="log-icon">{getLogIcon(entry.type)}</span>
+                        <span className="log-time">{formatTime(entry.timestamp)}</span>
+                        <span className="log-message">{entry.message}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
         <div ref={messagesEndRef} />

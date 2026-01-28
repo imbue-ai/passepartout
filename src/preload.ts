@@ -7,6 +7,11 @@ import { contextBridge, ipcRenderer } from 'electron';
 export type StatusUpdate = {
   type: 'idle' | 'busy' | 'tool' | 'reasoning' | 'generating' | 'retry';
   message?: string;
+  // Additional details for the execution log
+  details?: {
+    toolName?: string;
+    timestamp: number;
+  };
 };
 
 // Expose a secure API to the renderer process

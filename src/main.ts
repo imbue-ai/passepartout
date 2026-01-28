@@ -45,7 +45,7 @@ const createWindow = () => {
 };
 
 // Helper to send status updates to the renderer
-function sendStatusUpdate(status: { type: string; message?: string }) {
+function sendStatusUpdate(status: { type: string; message?: string; details?: { toolName?: string; timestamp: number } }) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('chat:statusUpdate', status);
   }
@@ -91,11 +91,19 @@ async function subscribeToEvents() {
           if (props?.sessionID === sessionId && props?.status) {
             const status = props.status;
             if (status.type === 'busy') {
-              sendStatusUpdate({ type: 'busy', message: 'Thinking...' });
+              sendStatusUpdate({
+                type: 'busy',
+                message: 'Thinking...',
+                details: { timestamp: Date.now() }
+              });
             } else if (status.type === 'idle') {
-              sendStatusUpdate({ type: 'idle' });
+              sendStatusUpdate({ type: 'idle', details: { timestamp: Date.now() } });
             } else if (status.type === 'retry') {
-              sendStatusUpdate({ type: 'retry', message: `Retrying (attempt ${status.attempt})...` });
+              sendStatusUpdate({
+                type: 'retry',
+                message: `Retrying (attempt ${status.attempt})...`,
+                details: { timestamp: Date.now() }
+              });
             }
           }
           break;
@@ -108,12 +116,24 @@ async function subscribeToEvents() {
               const toolPart = part as ToolPart;
               if (toolPart.state?.status === 'running') {
                 const description = getToolDescription(toolPart.tool, toolPart.state.title);
-                sendStatusUpdate({ type: 'tool', message: description });
+                sendStatusUpdate({
+                  type: 'tool',
+                  message: description,
+                  details: { toolName: toolPart.tool, timestamp: Date.now() }
+                });
               }
             } else if (part.type === 'reasoning') {
-              sendStatusUpdate({ type: 'reasoning', message: 'Reasoning...' });
+              sendStatusUpdate({
+                type: 'reasoning',
+                message: 'Reasoning...',
+                details: { timestamp: Date.now() }
+              });
             } else if (part.type === 'text') {
-              sendStatusUpdate({ type: 'generating', message: 'Generating response...' });
+              sendStatusUpdate({
+                type: 'generating',
+                message: 'Generating response...',
+                details: { timestamp: Date.now() }
+              });
             }
           }
           break;
@@ -121,7 +141,7 @@ async function subscribeToEvents() {
 
         case 'session.idle': {
           if (event.properties?.sessionID === sessionId) {
-            sendStatusUpdate({ type: 'idle' });
+            sendStatusUpdate({ type: 'idle', details: { timestamp: Date.now() } });
           }
           break;
         }
