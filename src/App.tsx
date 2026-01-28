@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import Markdown from 'react-markdown';
 
 type StatusUpdate = {
@@ -44,6 +44,77 @@ declare global {
 
 // Monotonically increasing counter for unique IDs
 let nextLogEntryId = 0;
+
+// ExecutionLog component with smart auto-scroll
+interface ExecutionLogProps {
+  log: ExecutionLogEntry[];
+  isExpanded: boolean;
+  onToggle: () => void;
+  formatTime: (timestamp: number) => string;
+  formatDuration: (ms: number) => string;
+  getLogIcon: (type: StatusUpdate['type']) => string;
+}
+
+function ExecutionLog({ log, isExpanded, onToggle, formatTime, formatDuration, getLogIcon }: ExecutionLogProps) {
+  const entriesRef = useRef<HTMLDivElement>(null);
+  const isAtBottomRef = useRef(true);
+
+  // Check if scrolled to bottom (with small threshold for floating point)
+  const checkIfAtBottom = useCallback(() => {
+    const el = entriesRef.current;
+    if (!el) return true;
+    const threshold = 5;
+    return el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+  }, []);
+
+  // Handle scroll events to track if user is at bottom
+  const handleScroll = useCallback(() => {
+    isAtBottomRef.current = checkIfAtBottom();
+  }, [checkIfAtBottom]);
+
+  // Auto-scroll to bottom when new entries are added (only if already at bottom)
+  useEffect(() => {
+    const el = entriesRef.current;
+    if (el && isAtBottomRef.current) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [log.length]);
+
+  return (
+    <div className="execution-log">
+      <button
+        className="execution-log-toggle"
+        onClick={onToggle}
+        type="button"
+      >
+        <span className="toggle-icon">{isExpanded ? '▼' : '▶'}</span>
+        <span className="toggle-text">
+          Execution log ({log.length} {log.length === 1 ? 'step' : 'steps'})
+        </span>
+      </button>
+      {isExpanded && (
+        <div
+          className="execution-log-entries"
+          ref={entriesRef}
+          onScroll={handleScroll}
+        >
+          {log.map((entry) => (
+            <div key={entry.id} className={`log-entry log-entry-${entry.type}`}>
+              <span className="log-icon">{getLogIcon(entry.type)}</span>
+              <span className="log-time">{formatTime(entry.timestamp)}</span>
+              <span className="log-message">
+                {entry.message}
+                {entry.duration !== undefined && (
+                  <span className="log-duration"> ({formatDuration(entry.duration)})</span>
+                )}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function App() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -184,34 +255,14 @@ function App() {
     const toggleId = isCurrentLoading ? -1 : messageId;
 
     return (
-      <div className="execution-log">
-        <button
-          className="execution-log-toggle"
-          onClick={() => toggleLogExpanded(toggleId)}
-          type="button"
-        >
-          <span className="toggle-icon">{isExpanded ? '▼' : '▶'}</span>
-          <span className="toggle-text">
-            Execution log ({log.length} {log.length === 1 ? 'step' : 'steps'})
-          </span>
-        </button>
-        {isExpanded && (
-          <div className="execution-log-entries">
-            {log.map((entry) => (
-              <div key={entry.id} className={`log-entry log-entry-${entry.type}`}>
-                <span className="log-icon">{getLogIcon(entry.type)}</span>
-                <span className="log-time">{formatTime(entry.timestamp)}</span>
-                <span className="log-message">
-                  {entry.message}
-                  {entry.duration !== undefined && (
-                    <span className="log-duration"> ({formatDuration(entry.duration)})</span>
-                  )}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      <ExecutionLog
+        log={log}
+        isExpanded={isExpanded}
+        onToggle={() => toggleLogExpanded(toggleId)}
+        formatTime={formatTime}
+        formatDuration={formatDuration}
+        getLogIcon={getLogIcon}
+      />
     );
   };
 

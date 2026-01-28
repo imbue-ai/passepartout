@@ -91,15 +91,12 @@ function formatToolInput(toolName: string, input?: Record<string, unknown>): str
   if (tool === 'read' || tool === 'write' || tool === 'edit') {
     const filePath = input.file_path || input.path || input.filename;
     if (filePath && typeof filePath === 'string') {
-      // Show just the filename for brevity
-      const parts = filePath.split('/');
-      return parts[parts.length - 1];
+      return filePath;
     }
   } else if (tool === 'bash') {
     const command = input.command;
     if (command && typeof command === 'string') {
-      // Truncate long commands
-      return command.length > 50 ? command.substring(0, 47) + '...' : command;
+      return command;
     }
   } else if (tool === 'glob') {
     const pattern = input.pattern;
@@ -109,34 +106,21 @@ function formatToolInput(toolName: string, input?: Record<string, unknown>): str
   } else if (tool === 'grep') {
     const pattern = input.pattern;
     if (pattern && typeof pattern === 'string') {
-      return `"${pattern.length > 30 ? pattern.substring(0, 27) + '...' : pattern}"`;
+      return `"${pattern}"`;
     }
   } else if (tool === 'web_search') {
     const query = input.query;
     if (query && typeof query === 'string') {
-      return `"${query.length > 40 ? query.substring(0, 37) + '...' : query}"`;
+      return `"${query}"`;
     }
   } else if (tool === 'web_fetch') {
     const url = input.url;
     if (url && typeof url === 'string') {
-      // Show just the domain for brevity
-      try {
-        const urlObj = new URL(url);
-        return urlObj.hostname;
-      } catch {
-        return url.length > 40 ? url.substring(0, 37) + '...' : url;
-      }
+      return url;
     }
   }
 
   return '';
-}
-
-// Helper to truncate output for display
-function truncateOutput(output?: string): string | undefined {
-  if (!output) return undefined;
-  if (output.length <= 100) return output;
-  return output.substring(0, 97) + '...';
 }
 
 // Subscribe to OpenCode events for real-time status updates
@@ -211,7 +195,7 @@ async function subscribeToEvents() {
                   details: {
                     toolName: toolPart.tool,
                     timestamp: Date.now(),
-                    output: truncateOutput(state.output),
+                    output: state.output,
                     duration,
                   }
                 });
