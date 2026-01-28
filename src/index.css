@@ -114,10 +114,47 @@ body {
   transition: background-color 0.2s;
 }
 
-.send-button:hover {
+.send-button:hover:not(:disabled) {
   background-color: #3a7bc8;
 }
 
-.send-button:active {
+.send-button:active:not(:disabled) {
   background-color: #2d6ab3;
+}
+
+.send-button:disabled {
+  background-color: #a0c4e8;
+  cursor: not-allowed;
+}
+
+/* Loading indicator styles */
+.loading-indicator {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  align-self: flex-start;
+  background-color: #f0f0f0;
+  border-radius: 16px;
+  border-bottom-left-radius: 4px;
+}
+
+.loading-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #ddd;
+  border-top-color: #4a90d9;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.loading-text {
+  font-size: 14px;
+  color: #666;
 }

@@ -3,9 +3,25 @@
 
 import { contextBridge, ipcRenderer } from 'electron';
 
+// Status update type
+export type StatusUpdate = {
+  type: 'idle' | 'busy' | 'tool' | 'reasoning' | 'generating' | 'retry';
+  message?: string;
+};
+
 // Expose a secure API to the renderer process
 contextBridge.exposeInMainWorld('electronAPI', {
   sendMessage: (message: string): Promise<string> => {
     return ipcRenderer.invoke('chat:sendMessage', message);
+  },
+  onStatusUpdate: (callback: (status: StatusUpdate) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, status: StatusUpdate) => {
+      callback(status);
+    };
+    ipcRenderer.on('chat:statusUpdate', handler);
+    // Return cleanup function
+    return () => {
+      ipcRenderer.removeListener('chat:statusUpdate', handler);
+    };
   },
 });

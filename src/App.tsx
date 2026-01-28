@@ -6,11 +6,17 @@ interface Message {
   sender: 'user' | 'bot';
 }
 
+type StatusUpdate = {
+  type: 'idle' | 'busy' | 'tool' | 'reasoning' | 'generating' | 'retry';
+  message?: string;
+};
+
 // Declare the electronAPI exposed by the preload script
 declare global {
   interface Window {
     electronAPI: {
       sendMessage: (message: string) => Promise<string>;
+      onStatusUpdate: (callback: (status: StatusUpdate) => void) => () => void;
     };
   }
 }
@@ -18,6 +24,8 @@ declare global {
 function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -28,9 +36,23 @@ function App() {
     scrollToBottom();
   }, [messages]);
 
+  // Subscribe to status updates from the main process
+  useEffect(() => {
+    const cleanup = window.electronAPI.onStatusUpdate((status) => {
+      if (status.type === 'idle') {
+        setIsLoading(false);
+        setStatusMessage('');
+      } else {
+        setIsLoading(true);
+        setStatusMessage(status.message || 'Working...');
+      }
+    });
+    return cleanup;
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputValue.trim()) return;
+    if (!inputValue.trim() || isLoading) return;
 
     const userMessage: Message = {
       id: Date.now(),
@@ -40,6 +62,8 @@ function App() {
 
     setMessages((prev) => [...prev, userMessage]);
     setInputValue('');
+    setIsLoading(true);
+    setStatusMessage('Thinking...');
 
     // Send message to main process via IPC and get response
     try {
@@ -57,6 +81,9 @@ function App() {
         sender: 'bot',
       };
       setMessages((prev) => [...prev, errorMessage]);
+    } finally {
+      setIsLoading(false);
+      setStatusMessage('');
     }
   };
 
@@ -79,6 +106,12 @@ function App() {
             {message.text}
           </div>
         ))}
+        {isLoading && (
+          <div className="loading-indicator">
+            <div className="loading-spinner" />
+            <span className="loading-text">{statusMessage}</span>
+          </div>
+        )}
         <div ref={messagesEndRef} />
       </div>
       <form className="input-container" onSubmit={handleSubmit}>
@@ -89,7 +122,7 @@ function App() {
           placeholder="Type a message..."
           className="message-input"
         />
-        <button type="submit" className="send-button">
+        <button type="submit" className="send-button" disabled={isLoading}>
           Send
         </button>
       </form>

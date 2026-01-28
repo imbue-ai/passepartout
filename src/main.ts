@@ -2,12 +2,13 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
 import { createOpencode } from '@opencode-ai/sdk';
-import type { OpencodeClient } from '@opencode-ai/sdk';
+import type { OpencodeClient, Event, Part, ToolPart } from '@opencode-ai/sdk';
 
 // OpenCode SDK client and session state
 let opencodeClient: OpencodeClient | null = null;
 let closeOpencodeServer: (() => void) | null = null;
 let sessionId: string | null = null;
+let mainWindow: BrowserWindow | null = null;
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
@@ -22,7 +23,7 @@ const fixupPathEnvs = () => {
 
 const createWindow = () => {
   // Create the browser window.
-  const mainWindow = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 800,
     height: 600,
     webPreferences: {
@@ -39,6 +40,94 @@ const createWindow = () => {
     );
   }
 };
+
+// Helper to send status updates to the renderer
+function sendStatusUpdate(status: { type: string; message?: string }) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('chat:statusUpdate', status);
+  }
+}
+
+// Helper to get a human-readable description for a tool
+function getToolDescription(toolName: string, title?: string): string {
+  if (title) {
+    return title;
+  }
+  // Map common tool names to friendly descriptions
+  const toolDescriptions: Record<string, string> = {
+    'read': 'Reading file',
+    'write': 'Writing file',
+    'edit': 'Editing file',
+    'bash': 'Running command',
+    'glob': 'Searching files',
+    'grep': 'Searching content',
+    'list_directory': 'Listing directory',
+    'web_search': 'Searching the web',
+    'web_fetch': 'Fetching webpage',
+  };
+  return toolDescriptions[toolName.toLowerCase()] || `Running ${toolName}`;
+}
+
+// Subscribe to OpenCode events for real-time status updates
+async function subscribeToEvents() {
+  if (!opencodeClient) return;
+
+  try {
+    const result = await opencodeClient.event.subscribe();
+
+    // Process events from the stream
+    for await (const eventData of result.stream) {
+      if (!eventData) continue;
+
+      // eventData is already the Event type
+      const event = eventData as Event;
+
+      switch (event.type) {
+        case 'session.status': {
+          const props = event.properties;
+          if (props?.sessionID === sessionId && props?.status) {
+            const status = props.status;
+            if (status.type === 'busy') {
+              sendStatusUpdate({ type: 'busy', message: 'Thinking...' });
+            } else if (status.type === 'idle') {
+              sendStatusUpdate({ type: 'idle' });
+            } else if (status.type === 'retry') {
+              sendStatusUpdate({ type: 'retry', message: `Retrying (attempt ${status.attempt})...` });
+            }
+          }
+          break;
+        }
+
+        case 'message.part.updated': {
+          const part = event.properties?.part as Part | undefined;
+          if (part?.sessionID === sessionId) {
+            if (part.type === 'tool') {
+              const toolPart = part as ToolPart;
+              if (toolPart.state?.status === 'running') {
+                const description = getToolDescription(toolPart.tool, toolPart.state.title);
+                sendStatusUpdate({ type: 'tool', message: description });
+              }
+            } else if (part.type === 'reasoning') {
+              sendStatusUpdate({ type: 'reasoning', message: 'Reasoning...' });
+            } else if (part.type === 'text') {
+              sendStatusUpdate({ type: 'generating', message: 'Generating response...' });
+            }
+          }
+          break;
+        }
+
+        case 'session.idle': {
+          if (event.properties?.sessionID === sessionId) {
+            sendStatusUpdate({ type: 'idle' });
+          }
+          break;
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Event subscription error:', error);
+  }
+}
 
 // Initialize OpenCode SDK and create a session
 async function initOpencode() {
@@ -67,6 +156,9 @@ async function initOpencode() {
 
     sessionId = session.data?.id ?? null;
     console.log('OpenCode session created:', sessionId);
+
+    // Start subscribing to events for real-time updates
+    subscribeToEvents();
   } catch (error) {
     console.error('Failed to initialize OpenCode SDK:', error);
   }
@@ -128,8 +220,8 @@ ipcMain.handle('chat:sendMessage', async (_event, message: string) => {
     if (response.data?.parts) {
       // Extract text parts from the response
       const textParts = response.data.parts
-        .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
-        .map((part) => part.text);
+        .filter((part) => part.type === 'text')
+        .map((part) => (part as { type: 'text'; text: string }).text);
 
       return textParts.join('\n') || 'No response received.';
     }
