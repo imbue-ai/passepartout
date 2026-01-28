@@ -21,8 +21,8 @@ export type StatusUpdate = {
 
 // Expose a secure API to the renderer process
 contextBridge.exposeInMainWorld('electronAPI', {
-  sendMessage: (message: string): Promise<string> => {
-    return ipcRenderer.invoke('chat:sendMessage', message);
+  sendMessage: (message: string, providerID: string, modelID: string): Promise<string> => {
+    return ipcRenderer.invoke('chat:sendMessage', message, providerID, modelID);
   },
   onStatusUpdate: (callback: (status: StatusUpdate) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, status: StatusUpdate) => {

@@ -32,11 +32,36 @@ interface Message {
   executionLog?: ExecutionLogEntry[];
 }
 
+type ModelOption = {
+  providerID: string;
+  modelID: string;
+  displayName: string;
+};
+
+// Available models configuration
+const availableModels: ModelOption[] = [
+  // Anthropic models
+  { providerID: 'anthropic', modelID: 'claude-opus-4-5-20251101', displayName: 'Claude Opus 4.5' },
+  { providerID: 'anthropic', modelID: 'claude-sonnet-4-5-20250929', displayName: 'Claude Sonnet 4.5' },
+  { providerID: 'anthropic', modelID: 'claude-haiku-4-5-20251017', displayName: 'Claude Haiku 4.5' },
+  // OpenAI models
+  { providerID: 'openai', modelID: 'o3', displayName: 'OpenAI o3' },
+  { providerID: 'openai', modelID: 'o4-mini', displayName: 'OpenAI o4-mini' },
+  { providerID: 'openai', modelID: 'gpt-4.1', displayName: 'GPT-4.1' },
+  { providerID: 'openai', modelID: 'gpt-4.1-mini', displayName: 'GPT-4.1 Mini' },
+  // Google models
+  { providerID: 'google', modelID: 'gemini-3-pro', displayName: 'Gemini 3 Pro' },
+  { providerID: 'google', modelID: 'gemini-3-flash', displayName: 'Gemini 3 Flash' },
+];
+
+// Default model
+const defaultModel = availableModels[0];
+
 // Declare the electronAPI exposed by the preload script
 declare global {
   interface Window {
     electronAPI: {
-      sendMessage: (message: string) => Promise<string>;
+      sendMessage: (message: string, providerID: string, modelID: string) => Promise<string>;
       onStatusUpdate: (callback: (status: StatusUpdate) => void) => () => void;
     };
   }
@@ -123,6 +148,7 @@ function App() {
   const [statusMessage, setStatusMessage] = useState<string>('');
   const [executionLog, setExecutionLog] = useState<ExecutionLogEntry[]>([]);
   const [expandedLogs, setExpandedLogs] = useState<Set<number>>(new Set());
+  const [selectedModel, setSelectedModel] = useState<ModelOption>(defaultModel);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const executionLogRef = useRef<ExecutionLogEntry[]>([]);
 
@@ -207,6 +233,15 @@ function App() {
     return cleanup;
   }, []);
 
+  const handleModelChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = e.target.value;
+    const [providerID, modelID] = value.split(':');
+    const model = availableModels.find(m => m.providerID === providerID && m.modelID === modelID);
+    if (model) {
+      setSelectedModel(model);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputValue.trim() || isLoading) return;
@@ -225,7 +260,7 @@ function App() {
 
     // Send message to main process via IPC and get response
     try {
-      const response = await window.electronAPI.sendMessage(inputValue);
+      const response = await window.electronAPI.sendMessage(inputValue, selectedModel.providerID, selectedModel.modelID);
       const botMessage: Message = {
         id: Date.now() + 1,
         text: response,
@@ -270,6 +305,21 @@ function App() {
     <div className="chat-container">
       <div className="chat-header">
         <h1>Chat</h1>
+        <select
+          className="model-selector"
+          value={`${selectedModel.providerID}:${selectedModel.modelID}`}
+          onChange={handleModelChange}
+          disabled={isLoading}
+        >
+          {availableModels.map((model) => (
+            <option
+              key={`${model.providerID}:${model.modelID}`}
+              value={`${model.providerID}:${model.modelID}`}
+            >
+              {model.displayName}
+            </option>
+          ))}
+        </select>
       </div>
       <div className="messages-container">
         {messages.length === 0 && !isLoading && (

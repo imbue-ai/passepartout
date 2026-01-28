@@ -321,7 +321,7 @@ app.on('activate', () => {
 });
 
 // IPC Handler: Server-side message processing using OpenCode SDK
-ipcMain.handle('chat:sendMessage', async (_event, message: string) => {
+ipcMain.handle('chat:sendMessage', async (_event, message: string, providerID: string, modelID: string) => {
   if (!opencodeClient || !sessionId) {
     return 'Error: OpenCode SDK not initialized. Please restart the app.';
   }
@@ -333,8 +333,8 @@ ipcMain.handle('chat:sendMessage', async (_event, message: string) => {
       body: {
         parts: [{ type: 'text', text: message }],
         model: {
-          providerID: 'anthropic',
-          modelID: 'claude-sonnet-4-5-20250929',
+          providerID,
+          modelID,
         },
       },
     });
