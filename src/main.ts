@@ -13,6 +13,17 @@ if (started) {
   app.quit();
 }
 
+const fixupPath = () => {
+  if (app.isPackaged) {
+    const binPath = path.join(process.resourcesPath, 'bin');
+    process.env.PATH = `${binPath}:${process.env.PATH}`;
+  } else {
+    // TODO: Make this platform-agnostic
+    const binPath = path.resolve(__dirname, 'node_modules/opencode-darwin-arm64/bin');
+    process.env.PATH = `${binPath}:${process.env.PATH}`;
+  }
+}
+
 const createWindow = () => {
   // Create the browser window.
   const mainWindow = new BrowserWindow({
@@ -66,6 +77,7 @@ async function initOpencode() {
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.on('ready', async () => {
+  fixupPath();
   await initOpencode();
   createWindow();
 });
