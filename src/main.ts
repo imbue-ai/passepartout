@@ -135,9 +135,6 @@ async function subscribeToEvents() {
 // Initialize OpenCode SDK and create a session
 async function initOpencode() {
   try {
-    const cwd = process.cwd();
-    console.log('Initializing OpenCode SDK with cwd:', cwd);
-
     const username = 'passepartout';
     const password = crypto.randomBytes(32).toString('hex');
     process.env.OPENCODE_SERVER_USERNAME = username;
@@ -153,7 +150,8 @@ async function initOpencode() {
       baseUrl: server.url,
       headers: {
         'Authorization': `Basic ${basicAuth}`,
-      }
+      },
+      directory: app.isPackaged ? path.join(process.resourcesPath, 'opencode_workspace') : path.resolve(__dirname, '../../opencode_workspace'),
     });
 
     opencodeClient = client;
@@ -164,9 +162,6 @@ async function initOpencode() {
     const session = await client.session.create({
       body: {
         title: 'Chat Session',
-      },
-      query: {
-        directory: cwd,
       },
     });
 

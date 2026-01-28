@@ -10,7 +10,10 @@ const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
     // TODO: Make this platform-agnostic
-    extraResource: [path.resolve(__dirname, 'native_tools')],
+    extraResource: [
+      path.resolve(__dirname, 'native_tools'),
+      path.resolve(__dirname, 'opencode_workspace'),
+    ],
   },
   rebuildConfig: {},
   makers: [
