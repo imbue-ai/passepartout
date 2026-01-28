@@ -3,8 +3,9 @@ import Markdown from 'react-markdown';
 
 type StatusUpdate = {
   type: 'idle' | 'busy' | 'tool' | 'tool-completed' | 'tool-error' | 'reasoning' | 'generating' | 'retry';
-  message?: string;
+  message?: string; // Truncated message for the status bubble
   details?: {
+    fullMessage?: string; // Full message for the execution log
     toolName?: string;
     timestamp: number;
     input?: Record<string, unknown>;
@@ -219,7 +220,8 @@ function App() {
           const newEntry: ExecutionLogEntry = {
             id: nextLogEntryId++,
             type: status.type,
-            message: status.message,
+            // Use fullMessage for the log if available, otherwise fall back to message
+            message: status.details.fullMessage || status.message,
             timestamp: status.details.timestamp,
             toolName: status.details.toolName,
             duration: status.details.duration,

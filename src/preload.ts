@@ -6,9 +6,10 @@ import { contextBridge, ipcRenderer } from 'electron';
 // Status update type
 export type StatusUpdate = {
   type: 'idle' | 'busy' | 'tool' | 'tool-completed' | 'tool-error' | 'reasoning' | 'generating' | 'retry';
-  message?: string;
+  message?: string; // Truncated message for the status bubble
   // Additional details for the execution log
   details?: {
+    fullMessage?: string; // Full message for the execution log (no truncation)
     toolName?: string;
     timestamp: number;
     // Tool-specific details

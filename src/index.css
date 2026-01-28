@@ -72,6 +72,7 @@ body {
 
 .messages-container {
   flex: 1;
+  min-height: 0; /* Required for overflow to work in flex container */
   overflow-y: auto;
   padding: 20px;
   display: flex;

@@ -46,6 +46,7 @@ const createWindow = () => {
 
 // Status update type for the renderer
 type StatusUpdateDetails = {
+  fullMessage?: string;
   toolName?: string;
   timestamp: number;
   input?: Record<string, unknown>;
@@ -81,8 +82,64 @@ function getToolDescription(toolName: string, title?: string): string {
   return toolDescriptions[toolName.toLowerCase()] || `Running ${toolName}`;
 }
 
-// Helper to format tool input for display
-function formatToolInput(toolName: string, input?: Record<string, unknown>): string {
+// Helper to truncate a string for display in the status bubble
+function truncateForStatus(text: string, maxLength: number): string {
+  if (text.length <= maxLength) return text;
+  return text.substring(0, maxLength - 3) + '...';
+}
+
+// Helper to format tool input for display in the status bubble (truncated)
+function formatToolInputForStatus(toolName: string, input?: Record<string, unknown>): string {
+  if (!input) return '';
+
+  const tool = toolName.toLowerCase();
+
+  // Extract the most relevant input field based on tool type
+  if (tool === 'read' || tool === 'write' || tool === 'edit') {
+    const filePath = input.file_path || input.path || input.filename;
+    if (filePath && typeof filePath === 'string') {
+      // Show just the filename for brevity in status
+      const parts = filePath.split('/');
+      return parts[parts.length - 1];
+    }
+  } else if (tool === 'bash') {
+    const command = input.command;
+    if (command && typeof command === 'string') {
+      return truncateForStatus(command, 50);
+    }
+  } else if (tool === 'glob') {
+    const pattern = input.pattern;
+    if (pattern && typeof pattern === 'string') {
+      return truncateForStatus(pattern, 40);
+    }
+  } else if (tool === 'grep') {
+    const pattern = input.pattern;
+    if (pattern && typeof pattern === 'string') {
+      return `"${truncateForStatus(pattern, 30)}"`;
+    }
+  } else if (tool === 'web_search') {
+    const query = input.query;
+    if (query && typeof query === 'string') {
+      return `"${truncateForStatus(query, 40)}"`;
+    }
+  } else if (tool === 'web_fetch') {
+    const url = input.url;
+    if (url && typeof url === 'string') {
+      // Show just the domain for brevity in status
+      try {
+        const urlObj = new URL(url);
+        return urlObj.hostname;
+      } catch {
+        return truncateForStatus(url, 40);
+      }
+    }
+  }
+
+  return '';
+}
+
+// Helper to format tool input for the detailed execution log (full, no truncation)
+function formatToolInputForLog(toolName: string, input?: Record<string, unknown>): string {
   if (!input) return '';
 
   const tool = toolName.toLowerCase();
@@ -172,12 +229,14 @@ async function subscribeToEvents() {
                 const description = getToolDescription(toolPart.tool, state.title);
                 // Extract useful input details
                 const input = state.input as Record<string, unknown> | undefined;
-                const inputSummary = formatToolInput(toolPart.tool, input);
+                const inputSummaryTruncated = formatToolInputForStatus(toolPart.tool, input);
+                const inputSummaryFull = formatToolInputForLog(toolPart.tool, input);
 
                 sendStatusUpdate({
                   type: 'tool',
-                  message: inputSummary ? `${description}: ${inputSummary}` : description,
+                  message: inputSummaryTruncated ? `${description}: ${inputSummaryTruncated}` : description,
                   details: {
+                    fullMessage: inputSummaryFull ? `${description}: ${inputSummaryFull}` : description,
                     toolName: toolPart.tool,
                     timestamp: Date.now(),
                     input: input,
