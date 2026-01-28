@@ -3,6 +3,7 @@ import path from 'node:path';
 import started from 'electron-squirrel-startup';
 import { createOpencode } from '@opencode-ai/sdk';
 import type { OpencodeClient, Event, Part, ToolPart } from '@opencode-ai/sdk';
+import getPort from 'get-port';
 
 // OpenCode SDK client and session state
 let opencodeClient: OpencodeClient | null = null;
@@ -136,13 +137,12 @@ async function initOpencode() {
     console.log('Initializing OpenCode SDK with cwd:', cwd);
 
     const { client, server } = await createOpencode({
-      port: 14096,
+      port: await getPort(),
     });
 
     opencodeClient = client;
     closeOpencodeServer = server.close;
-    console.log('XXX opencode server url', server.url);
-    console.log('XXX opencode server close', server.close);
+    console.log('OpenCode server started on', server.url);
 
     // Create a session for the chat
     const session = await client.session.create({
@@ -183,9 +183,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('will-quit', () => {
-  console.log('XXX will-quit');
   if (closeOpencodeServer) {
-    console.log('XXX closing opencode server');
     closeOpencodeServer();
   }
 });
