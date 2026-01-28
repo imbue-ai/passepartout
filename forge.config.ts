@@ -4,10 +4,13 @@ import { MakerZIP } from '@electron-forge/maker-zip';
 import { MakerDeb } from '@electron-forge/maker-deb';
 import { MakerRpm } from '@electron-forge/maker-rpm';
 import { VitePlugin } from '@electron-forge/plugin-vite';
+import path from 'node:path';
 
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
+    // TODO: Make this platform-agnostic
+    extraResource: [path.resolve(__dirname, 'node_modules/opencode-darwin-arm64/bin')],
   },
   rebuildConfig: {},
   makers: [
