@@ -195,7 +195,7 @@ impl OpencodeManager {
         // Start the OpenCode server
         // Note: Don't set current_dir - the opencode binary has its own directory requirements.
         // The workspace directory is passed via X-Opencode-Directory header when creating sessions.
-        println!("[OpenCode] Starting server with args: server --port {}", port);
+        println!("[OpenCode] Starting server with args: serve --port {}", port);
         let mut server_process = Command::new(&opencode_binary)
             .args(["serve", "--port", &port.to_string()])
             .env("PATH", &path_env)
@@ -212,6 +212,42 @@ impl OpencodeManager {
 
         println!("[OpenCode] Server process spawned with PID: {:?}", server_process.id());
 
+        // Read stdout to get the actual server URL (the server prints "opencode server listening on <url>")
+        let stdout = server_process.stdout.take()
+            .ok_or_else(|| "Failed to capture server stdout".to_string())?;
+
+        let base_url = tokio::task::spawn_blocking(move || {
+            use std::io::{BufRead, BufReader};
+            let reader = BufReader::new(stdout);
+            let mut output = String::new();
+
+            for line in reader.lines() {
+                match line {
+                    Ok(line) => {
+                        println!("[OpenCode] Server stdout: {}", line);
+                        output.push_str(&line);
+                        output.push('\n');
+
+                        if line.contains("opencode server listening") {
+                            // Parse URL from line like "opencode server listening on http://127.0.0.1:4096"
+                            if let Some(url_start) = line.find("http") {
+                                let url = line[url_start..].split_whitespace().next().unwrap_or("");
+                                return Ok(url.trim_end_matches('/').to_string());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        return Err(format!("Error reading server stdout: {}", e));
+                    }
+                }
+            }
+            Err(format!("Server exited without printing listening URL. Output: {}", output))
+        })
+        .await
+        .map_err(|e| format!("Failed to wait for server URL: {}", e))??;
+
+        println!("[OpenCode] Server URL from stdout: {}", base_url);
+
         // Create HTTP client
         let client = Client::builder()
             .timeout(Duration::from_secs(300))
@@ -220,91 +256,11 @@ impl OpencodeManager {
 
         let auth_header = format!("Basic {}", BASE64.encode(format!("{}:{}", username, password)));
 
-        // Wait for the server to be ready
-        let mut retries = 0;
-        let max_retries = 30;
-        let mut last_error: Option<String> = None;
-        loop {
-            // Check if the process has exited
-            match server_process.try_wait() {
-                Ok(Some(status)) => {
-                    // Process has exited, capture stderr
-                    let mut stderr_output = String::new();
-                    if let Some(mut stderr) = server_process.stderr.take() {
-                        use std::io::Read;
-                        let _ = stderr.read_to_string(&mut stderr_output);
-                    }
-                    let mut stdout_output = String::new();
-                    if let Some(mut stdout) = server_process.stdout.take() {
-                        use std::io::Read;
-                        let _ = stdout.read_to_string(&mut stdout_output);
-                    }
-                    return Err(format!(
-                        "OpenCode server exited unexpectedly with status: {}\nStdout: {}\nStderr: {}",
-                        status, stdout_output, stderr_output
-                    ));
-                }
-                Ok(None) => {
-                    // Process still running, continue waiting
-                }
-                Err(e) => {
-                    return Err(format!("Failed to check server process status: {}", e));
-                }
-            }
-
-            match client
-                .get(format!("{}/api/health", base_url))
-                .header("Authorization", &auth_header)
-                .send()
-                .await
-            {
-                Ok(resp) if resp.status().is_success() => {
-                    println!("[OpenCode] Health check passed after {} retries", retries);
-                    break;
-                }
-                Ok(resp) => {
-                    last_error = Some(format!("Health check returned status: {}", resp.status()));
-                    retries += 1;
-                    if retries >= max_retries {
-                        return Err(format!(
-                            "OpenCode server failed to start after {} retries. Last error: {}",
-                            max_retries,
-                            last_error.unwrap_or_else(|| "Unknown".to_string())
-                        ));
-                    }
-                    println!("[OpenCode] Health check attempt {}/{}: {}", retries, max_retries, last_error.as_ref().unwrap());
-                    tokio::time::sleep(Duration::from_millis(500)).await;
-                }
-                Err(e) => {
-                    last_error = Some(format!("Connection error: {}", e));
-                    retries += 1;
-                    if retries >= max_retries {
-                        // Try to get process output before failing
-                        let mut stderr_output = String::new();
-                        if let Some(mut stderr) = server_process.stderr.take() {
-                            use std::io::Read;
-                            let _ = stderr.read_to_string(&mut stderr_output);
-                        }
-                        return Err(format!(
-                            "OpenCode server failed to start after {} retries. Last error: {}\nServer stderr: {}",
-                            max_retries,
-                            last_error.unwrap_or_else(|| "Unknown".to_string()),
-                            if stderr_output.is_empty() { "(empty)" } else { &stderr_output }
-                        ));
-                    }
-                    if retries % 5 == 0 {
-                        println!("[OpenCode] Health check attempt {}/{}: {}", retries, max_retries, last_error.as_ref().unwrap());
-                    }
-                    tokio::time::sleep(Duration::from_millis(500)).await;
-                }
-            }
-        }
-
         println!("OpenCode server started on {}", base_url);
 
         // Create a session
         let session_resp = client
-            .post(format!("{}/api/session", base_url))
+            .post(format!("{}/session", base_url))
             .header("Authorization", &auth_header)
             .header("Content-Type", "application/json")
             .header("X-Opencode-Directory", opencode_workspace_path.to_string_lossy().to_string())
@@ -374,7 +330,7 @@ impl OpencodeManager {
 
         let response = self
             .client
-            .post(format!("{}/api/session/{}/message", self.base_url, self.session_id))
+            .post(format!("{}/session/{}/message", self.base_url, self.session_id))
             .header("Authorization", &self.auth_header)
             .header("Content-Type", "application/json")
             .json(&request)
@@ -430,7 +386,7 @@ impl OpencodeManager {
         F: Fn(StatusUpdate) + Send + 'static,
     {
         let response = match client
-            .get(format!("{}/api/event", base_url))
+            .get(format!("{}/event", base_url))
             .header("Authorization", &auth_header)
             .header("Accept", "text/event-stream")
             .send()
