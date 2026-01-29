@@ -131,6 +131,7 @@ pub struct OpencodeManager {
     base_url: String,
     auth_header: String,
     session_id: String,
+    workspace_path: String,
     #[allow(dead_code)]
     server_process: Option<Child>,
 }
@@ -214,42 +215,6 @@ impl OpencodeManager {
 
         println!("[OpenCode] Server process spawned with PID: {:?}", server_process.id());
 
-        // Read stdout to get the actual server URL (the server prints "opencode server listening on <url>")
-        let stdout = server_process.stdout.take()
-            .ok_or_else(|| "Failed to capture server stdout".to_string())?;
-
-        let base_url = tokio::task::spawn_blocking(move || {
-            use std::io::{BufRead, BufReader};
-            let reader = BufReader::new(stdout);
-            let mut output = String::new();
-
-            for line in reader.lines() {
-                match line {
-                    Ok(line) => {
-                        println!("[OpenCode] Server stdout: {}", line);
-                        output.push_str(&line);
-                        output.push('\n');
-
-                        if line.contains("opencode server listening") {
-                            // Parse URL from line like "opencode server listening on http://127.0.0.1:4096"
-                            if let Some(url_start) = line.find("http") {
-                                let url = line[url_start..].split_whitespace().next().unwrap_or("");
-                                return Ok(url.trim_end_matches('/').to_string());
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        return Err(format!("Error reading server stdout: {}", e));
-                    }
-                }
-            }
-            Err(format!("Server exited without printing listening URL. Output: {}", output))
-        })
-        .await
-        .map_err(|e| format!("Failed to wait for server URL: {}", e))??;
-
-        println!("[OpenCode] Server URL from stdout: {}", base_url);
-
         // Create HTTP client
         let client = Client::builder()
             .timeout(Duration::from_secs(300))
@@ -258,14 +223,49 @@ impl OpencodeManager {
 
         let auth_header = format!("Basic {}", BASE64.encode(format!("{}:{}", username, password)));
 
-        println!("OpenCode server started on {}", base_url);
+        // Wait for the server to be ready using health check
+        let mut retries = 0;
+        let max_retries = 60;
+        loop {
+            match client
+                .get(format!("{}/global/health", base_url))
+                .header("Authorization", &auth_header)
+                .send()
+                .await
+            {
+                Ok(resp) if resp.status().is_success() => {
+                    println!("[OpenCode] Health check passed after {} retries", retries);
+                    break;
+                }
+                Ok(resp) => {
+                    println!("[OpenCode] Health check returned status: {}", resp.status());
+                }
+                Err(e) => {
+                    if retries % 10 == 0 {
+                        println!("[OpenCode] Health check attempt {}/{}: {}", retries, max_retries, e);
+                    }
+                }
+            }
+
+            retries += 1;
+            if retries >= max_retries {
+                return Err(format!("OpenCode server failed to start after {} retries", max_retries));
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+
+        println!("[OpenCode] Server started on {}", base_url);
+
+        // Store the workspace path as a string for later use
+        let workspace_path = opencode_workspace_path.to_string_lossy().to_string();
+        println!("[OpenCode] Using workspace path: {}", workspace_path);
 
         // Create a session
         let session_resp = client
             .post(format!("{}/session", base_url))
             .header("Authorization", &auth_header)
             .header("Content-Type", "application/json")
-            .header("X-Opencode-Directory", opencode_workspace_path.to_string_lossy().to_string())
+            .header("X-Opencode-Directory", &workspace_path)
             .json(&serde_json::json!({ "title": "Chat Session" }))
             .send()
             .await
@@ -293,6 +293,7 @@ impl OpencodeManager {
             base_url,
             auth_header,
             session_id: session_response.id,
+            workspace_path,
             server_process: Some(server_process),
         })
     }
@@ -335,6 +336,7 @@ impl OpencodeManager {
             .post(format!("{}/session/{}/message", self.base_url, self.session_id))
             .header("Authorization", &self.auth_header)
             .header("Content-Type", "application/json")
+            .header("X-Opencode-Directory", &self.workspace_path)
             .json(&request)
             .send()
             .await
