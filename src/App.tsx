@@ -1,5 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import Markdown from 'react-markdown';
+import { invoke } from '@tauri-apps/api/core';
+import { listen, UnlistenFn } from '@tauri-apps/api/event';
 
 type StatusUpdate = {
   type: 'idle' | 'busy' | 'tool' | 'tool-completed' | 'tool-error' | 'reasoning' | 'generating' | 'retry';
@@ -57,16 +59,6 @@ const availableModels: ModelOption[] = [
 
 // Default model
 const defaultModel = availableModels[0];
-
-// Declare the electronAPI exposed by the preload script
-declare global {
-  interface Window {
-    electronAPI: {
-      sendMessage: (message: string, providerID: string, modelID: string) => Promise<string>;
-      onStatusUpdate: (callback: (status: StatusUpdate) => void) => () => void;
-    };
-  }
-}
 
 // Monotonically increasing counter for unique IDs
 let nextLogEntryId = 0;
@@ -205,34 +197,46 @@ function App() {
     scrollToBottom();
   }, [messages]);
 
-  // Subscribe to status updates from the main process
+  // Subscribe to status updates from the Tauri backend
   useEffect(() => {
-    const cleanup = window.electronAPI.onStatusUpdate((status) => {
-      if (status.type === 'idle') {
-        setIsLoading(false);
-        setStatusMessage('');
-      } else {
-        setIsLoading(true);
-        setStatusMessage(status.message || 'Working...');
+    let unlisten: UnlistenFn | null = null;
 
-        // Add entry to execution log (only for non-idle statuses)
-        if (status.message && status.details?.timestamp) {
-          const newEntry: ExecutionLogEntry = {
-            id: nextLogEntryId++,
-            type: status.type,
-            // Use fullMessage for the log if available, otherwise fall back to message
-            message: status.details.fullMessage || status.message,
-            timestamp: status.details.timestamp,
-            toolName: status.details.toolName,
-            duration: status.details.duration,
-            output: status.details.output,
-            error: status.details.error,
-          };
-          setExecutionLog((prev) => [...prev, newEntry]);
+    const setupListener = async () => {
+      unlisten = await listen<StatusUpdate>('chat:statusUpdate', (event) => {
+        const status = event.payload;
+        if (status.type === 'idle') {
+          setIsLoading(false);
+          setStatusMessage('');
+        } else {
+          setIsLoading(true);
+          setStatusMessage(status.message || 'Working...');
+
+          // Add entry to execution log (only for non-idle statuses)
+          if (status.message && status.details?.timestamp) {
+            const newEntry: ExecutionLogEntry = {
+              id: nextLogEntryId++,
+              type: status.type,
+              // Use fullMessage for the log if available, otherwise fall back to message
+              message: status.details.fullMessage || status.message,
+              timestamp: status.details.timestamp,
+              toolName: status.details.toolName,
+              duration: status.details.duration,
+              output: status.details.output,
+              error: status.details.error,
+            };
+            setExecutionLog((prev) => [...prev, newEntry]);
+          }
         }
+      });
+    };
+
+    setupListener();
+
+    return () => {
+      if (unlisten) {
+        unlisten();
       }
-    });
-    return cleanup;
+    };
   }, []);
 
   const handleModelChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -260,9 +264,13 @@ function App() {
     setStatusMessage('Thinking...');
     setExecutionLog([]); // Clear execution log for new request
 
-    // Send message to main process via IPC and get response
+    // Send message to Tauri backend via invoke and get response
     try {
-      const response = await window.electronAPI.sendMessage(inputValue, selectedModel.providerID, selectedModel.modelID);
+      const response = await invoke<string>('send_message', {
+        message: inputValue,
+        providerId: selectedModel.providerID,
+        modelId: selectedModel.modelID,
+      });
       const botMessageId = Date.now() + 1;
       const botMessage: Message = {
         id: botMessageId,
@@ -284,7 +292,7 @@ function App() {
       const errorMessageId = Date.now() + 1;
       const errorMessage: Message = {
         id: errorMessageId,
-        text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        text: `Error: ${error instanceof Error ? error.message : String(error)}`,
         sender: 'bot',
         executionLog: executionLogRef.current.length > 0 ? [...executionLogRef.current] : undefined,
       };

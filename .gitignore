@@ -88,7 +88,10 @@ typings/
 # Vite
 .vite/
 
-# Electron-Forge
-out/
+# Tauri
+src-tauri/target/
+
+# Vite build output
+dist/
 
 /native_tools
