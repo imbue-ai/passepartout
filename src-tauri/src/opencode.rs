@@ -73,6 +73,8 @@ struct PromptResponsePart {
 
 #[derive(Debug, Deserialize)]
 struct PromptResponse {
+    #[allow(dead_code)]
+    info: Option<serde_json::Value>,
     parts: Option<Vec<PromptResponsePart>>,
 }
 
