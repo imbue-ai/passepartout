@@ -44,13 +44,13 @@ fn main() {
         })
         .setup(|app| {
             let app_handle = app.handle().clone();
-            let state = app.state::<AppState>().inner().clone();
+            let opencode_arc = app.state::<AppState>().opencode.clone();
 
             // Initialize OpenCode in a background task
             tauri::async_runtime::spawn(async move {
                 match OpencodeManager::new(&app_handle).await {
                     Ok(manager) => {
-                        let mut opencode_guard = state.opencode.lock().await;
+                        let mut opencode_guard = opencode_arc.lock().await;
                         *opencode_guard = Some(manager);
                         println!("OpenCode manager initialized successfully");
                     }
