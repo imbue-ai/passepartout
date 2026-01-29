@@ -3,6 +3,9 @@ use keyring::Entry;
 /// Service name used for storing credentials in the system keychain
 const SERVICE_NAME: &str = "passepartout";
 
+/// Target name for keyring entries (helps with macOS keychain identification)
+const TARGET_NAME: &str = "passepartout-api-keys";
+
 /// Supported LLM providers
 #[derive(Debug, Clone, Copy)]
 pub enum Provider {
@@ -50,32 +53,74 @@ impl Provider {
 pub struct CredentialManager;
 
 impl CredentialManager {
+    /// Create an entry for a provider
+    fn create_entry(provider: Provider) -> Result<Entry, String> {
+        // Use new_with_target for better cross-platform compatibility
+        // Target helps identify the entry in the keychain
+        Entry::new_with_target(TARGET_NAME, SERVICE_NAME, provider.as_str())
+            .map_err(|e| format!("Failed to create keyring entry: {}", e))
+    }
+
     /// Save a credential for a provider to the system keychain
     pub fn save_credential(provider: Provider, api_key: &str) -> Result<(), String> {
-        let entry = Entry::new(SERVICE_NAME, provider.as_str())
-            .map_err(|e| format!("Failed to create keyring entry: {}", e))?;
+        let entry = Self::create_entry(provider)?;
+        println!(
+            "[credentials] Setting password for entry: target={}, service={}, user={}",
+            TARGET_NAME, SERVICE_NAME, provider.as_str()
+        );
 
         entry
             .set_password(api_key)
-            .map_err(|e| format!("Failed to save credential: {}", e))
+            .map_err(|e| format!("Failed to save credential: {}", e))?;
+
+        // Verify the save worked by reading it back
+        match entry.get_password() {
+            Ok(stored) => {
+                if stored == api_key {
+                    println!("[credentials] Verified: password was stored correctly");
+                    Ok(())
+                } else {
+                    Err("Password verification failed: stored value doesn't match".to_string())
+                }
+            }
+            Err(e) => Err(format!(
+                "Password verification failed: could not read back: {}",
+                e
+            )),
+        }
     }
 
     /// Get a credential for a provider from the system keychain
     pub fn get_credential(provider: Provider) -> Result<Option<String>, String> {
-        let entry = Entry::new(SERVICE_NAME, provider.as_str())
-            .map_err(|e| format!("Failed to create keyring entry: {}", e))?;
+        let entry = Self::create_entry(provider)?;
 
         match entry.get_password() {
-            Ok(password) => Ok(Some(password)),
-            Err(keyring::Error::NoEntry) => Ok(None),
-            Err(e) => Err(format!("Failed to retrieve credential: {}", e)),
+            Ok(password) => {
+                println!(
+                    "[credentials] Retrieved password for {}: {} chars",
+                    provider.as_str(),
+                    password.len()
+                );
+                Ok(Some(password))
+            }
+            Err(keyring::Error::NoEntry) => {
+                println!("[credentials] No entry found for {}", provider.as_str());
+                Ok(None)
+            }
+            Err(e) => {
+                println!(
+                    "[credentials] Error retrieving {}: {}",
+                    provider.as_str(),
+                    e
+                );
+                Err(format!("Failed to retrieve credential: {}", e))
+            }
         }
     }
 
     /// Delete a credential for a provider from the system keychain
     pub fn delete_credential(provider: Provider) -> Result<(), String> {
-        let entry = Entry::new(SERVICE_NAME, provider.as_str())
-            .map_err(|e| format!("Failed to create keyring entry: {}", e))?;
+        let entry = Self::create_entry(provider)?;
 
         match entry.delete_credential() {
             Ok(()) => Ok(()),
