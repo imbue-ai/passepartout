@@ -1,3 +1,4 @@
+use crate::credentials::CredentialManager;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::io::{BufRead, BufReader};
@@ -178,6 +179,19 @@ impl OpencodeManager {
             .current_dir(&self.workspace_path)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+
+        // Inject API credentials from the keychain
+        match CredentialManager::get_credentials_as_env_vars() {
+            Ok(env_vars) => {
+                for (key, value) in env_vars {
+                    eprintln!("[opencode] Setting env var: {} (key present)", key);
+                    cmd.env(key, value);
+                }
+            }
+            Err(e) => {
+                eprintln!("[opencode] Warning: Failed to get credentials: {}", e);
+            }
+        }
 
         // Spawn the process
         let mut child = cmd

@@ -424,3 +424,246 @@ body {
   color: #888;
   font-size: 11px;
 }
+
+/* Header actions container */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Settings button */
+.settings-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background-color: rgba(255, 255, 255, 0.2);
+  color: white;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.settings-button:hover {
+  background-color: rgba(255, 255, 255, 0.3);
+}
+
+.settings-button:active {
+  background-color: rgba(255, 255, 255, 0.4);
+}
+
+/* Credentials Panel */
+.credentials-panel {
+  background-color: #fff;
+  border-bottom: 1px solid #e0e0e0;
+  padding: 16px 20px;
+  animation: slideDown 0.2s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.credentials-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.credentials-header h2 {
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+  margin: 0;
+}
+
+.close-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: #666;
+  font-size: 20px;
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.close-button:hover {
+  background-color: #f0f0f0;
+  color: #333;
+}
+
+.credentials-description {
+  font-size: 13px;
+  color: #666;
+  margin-bottom: 16px;
+}
+
+.credentials-error {
+  background-color: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #dc2626;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.credentials-loading {
+  text-align: center;
+  color: #666;
+  padding: 20px;
+  font-size: 14px;
+}
+
+.credentials-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.credential-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background-color: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+}
+
+.credential-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.credential-name {
+  font-weight: 500;
+  color: #333;
+  font-size: 14px;
+}
+
+.credential-status {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.credential-status.has-key {
+  background-color: #dcfce7;
+  color: #166534;
+}
+
+.credential-status.no-key {
+  background-color: #fef3c7;
+  color: #92400e;
+}
+
+.credential-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.credential-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, monospace;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.credential-input:focus {
+  border-color: #4a90d9;
+}
+
+.credential-input::placeholder {
+  color: #999;
+  font-family: inherit;
+}
+
+.credential-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.edit-button,
+.delete-button,
+.save-button,
+.cancel-button {
+  padding: 6px 14px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.edit-button {
+  background-color: #4a90d9;
+  color: white;
+}
+
+.edit-button:hover {
+  background-color: #3a7bc8;
+}
+
+.delete-button {
+  background-color: #fee2e2;
+  color: #dc2626;
+}
+
+.delete-button:hover {
+  background-color: #fecaca;
+}
+
+.save-button {
+  background-color: #22c55e;
+  color: white;
+}
+
+.save-button:hover:not(:disabled) {
+  background-color: #16a34a;
+}
+
+.save-button:disabled {
+  background-color: #86efac;
+  cursor: not-allowed;
+}
+
+.cancel-button {
+  background-color: #e5e7eb;
+  color: #374151;
+}
+
+.cancel-button:hover:not(:disabled) {
+  background-color: #d1d5db;
+}
+
+.cancel-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

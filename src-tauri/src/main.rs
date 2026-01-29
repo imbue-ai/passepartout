@@ -1,8 +1,10 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod credentials;
 mod opencode;
 
+use credentials::{CredentialManager, Provider};
 use opencode::OpencodeManager;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -36,6 +38,42 @@ async fn send_message(
         .await
 }
 
+/// Credential status for a single provider
+#[derive(serde::Serialize)]
+struct CredentialStatus {
+    provider_id: String,
+    has_key: bool,
+}
+
+/// Save an API key for a provider to the system keychain
+#[tauri::command]
+fn save_credential(provider_id: String, api_key: String) -> Result<(), String> {
+    let provider = Provider::from_str(&provider_id)
+        .ok_or_else(|| format!("Unknown provider: {}", provider_id))?;
+    CredentialManager::save_credential(provider, &api_key)
+}
+
+/// Delete an API key for a provider from the system keychain
+#[tauri::command]
+fn delete_credential(provider_id: String) -> Result<(), String> {
+    let provider = Provider::from_str(&provider_id)
+        .ok_or_else(|| format!("Unknown provider: {}", provider_id))?;
+    CredentialManager::delete_credential(provider)
+}
+
+/// Get the status of all credentials (which providers have keys stored)
+#[tauri::command]
+fn list_credentials() -> Result<Vec<CredentialStatus>, String> {
+    let credentials = CredentialManager::list_credentials()?;
+    Ok(credentials
+        .into_iter()
+        .map(|(provider_id, has_key)| CredentialStatus {
+            provider_id,
+            has_key,
+        })
+        .collect())
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -62,7 +100,12 @@ fn main() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![send_message])
+        .invoke_handler(tauri::generate_handler![
+            send_message,
+            save_credential,
+            delete_credential,
+            list_credentials
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -3,6 +3,28 @@ import Markdown from 'react-markdown';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 
+// Credential types
+interface CredentialStatus {
+  provider_id: string;
+  has_key: boolean;
+}
+
+// Provider display info
+const providerInfo: Record<string, { displayName: string; placeholder: string }> = {
+  anthropic: {
+    displayName: 'Anthropic',
+    placeholder: 'sk-ant-...',
+  },
+  openai: {
+    displayName: 'OpenAI',
+    placeholder: 'sk-...',
+  },
+  google: {
+    displayName: 'Google',
+    placeholder: 'AIza...',
+  },
+};
+
 type StatusUpdate = {
   type: 'idle' | 'busy' | 'tool' | 'tool-completed' | 'tool-error' | 'reasoning' | 'generating' | 'retry';
   message?: string; // Truncated message for the status bubble
@@ -62,6 +84,175 @@ const defaultModel = availableModels[0];
 
 // Monotonically increasing counter for unique IDs
 let nextLogEntryId = 0;
+
+// CredentialsPanel component for managing API keys
+interface CredentialsPanelProps {
+  onClose: () => void;
+}
+
+function CredentialsPanel({ onClose }: CredentialsPanelProps) {
+  const [credentials, setCredentials] = useState<CredentialStatus[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [editingProvider, setEditingProvider] = useState<string | null>(null);
+  const [apiKeyInput, setApiKeyInput] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Load credentials on mount
+  useEffect(() => {
+    loadCredentials();
+  }, []);
+
+  const loadCredentials = async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      const result = await invoke<CredentialStatus[]>('list_credentials');
+      setCredentials(result);
+    } catch (err) {
+      setError(`Failed to load credentials: ${err}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSaveCredential = async (providerId: string) => {
+    if (!apiKeyInput.trim()) {
+      setError('API key cannot be empty');
+      return;
+    }
+
+    try {
+      setIsSaving(true);
+      setError(null);
+      await invoke('save_credential', {
+        providerId,
+        apiKey: apiKeyInput.trim(),
+      });
+      setEditingProvider(null);
+      setApiKeyInput('');
+      await loadCredentials();
+    } catch (err) {
+      setError(`Failed to save credential: ${err}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDeleteCredential = async (providerId: string) => {
+    try {
+      setError(null);
+      await invoke('delete_credential', { providerId });
+      await loadCredentials();
+    } catch (err) {
+      setError(`Failed to delete credential: ${err}`);
+    }
+  };
+
+  const startEditing = (providerId: string) => {
+    setEditingProvider(providerId);
+    setApiKeyInput('');
+    setError(null);
+  };
+
+  const cancelEditing = () => {
+    setEditingProvider(null);
+    setApiKeyInput('');
+    setError(null);
+  };
+
+  return (
+    <div className="credentials-panel">
+      <div className="credentials-header">
+        <h2>API Keys</h2>
+        <button className="close-button" onClick={onClose} type="button">
+          &times;
+        </button>
+      </div>
+      <p className="credentials-description">
+        Configure your API keys for each LLM provider. Keys are stored securely in your system keychain.
+      </p>
+      {error && <div className="credentials-error">{error}</div>}
+      {isLoading ? (
+        <div className="credentials-loading">Loading...</div>
+      ) : (
+        <div className="credentials-list">
+          {credentials.map((cred) => {
+            const info = providerInfo[cred.provider_id] || {
+              displayName: cred.provider_id,
+              placeholder: 'Enter API key...',
+            };
+            const isEditing = editingProvider === cred.provider_id;
+
+            return (
+              <div key={cred.provider_id} className="credential-item">
+                <div className="credential-info">
+                  <span className="credential-name">{info.displayName}</span>
+                  <span className={`credential-status ${cred.has_key ? 'has-key' : 'no-key'}`}>
+                    {cred.has_key ? 'Configured' : 'Not configured'}
+                  </span>
+                </div>
+                {isEditing ? (
+                  <div className="credential-edit">
+                    <input
+                      type="password"
+                      value={apiKeyInput}
+                      onChange={(e) => setApiKeyInput(e.target.value)}
+                      placeholder={info.placeholder}
+                      className="credential-input"
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleSaveCredential(cred.provider_id);
+                        if (e.key === 'Escape') cancelEditing();
+                      }}
+                    />
+                    <div className="credential-actions">
+                      <button
+                        className="save-button"
+                        onClick={() => handleSaveCredential(cred.provider_id)}
+                        disabled={isSaving}
+                        type="button"
+                      >
+                        {isSaving ? 'Saving...' : 'Save'}
+                      </button>
+                      <button
+                        className="cancel-button"
+                        onClick={cancelEditing}
+                        disabled={isSaving}
+                        type="button"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="credential-actions">
+                    <button
+                      className="edit-button"
+                      onClick={() => startEditing(cred.provider_id)}
+                      type="button"
+                    >
+                      {cred.has_key ? 'Update' : 'Add'}
+                    </button>
+                    {cred.has_key && (
+                      <button
+                        className="delete-button"
+                        onClick={() => handleDeleteCredential(cred.provider_id)}
+                        type="button"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ExecutionLog component with smart auto-scroll
 interface ExecutionLogProps {
@@ -142,6 +333,7 @@ function App() {
   const [executionLog, setExecutionLog] = useState<ExecutionLogEntry[]>([]);
   const [expandedLogs, setExpandedLogs] = useState<Set<number>>(new Set());
   const [selectedModel, setSelectedModel] = useState<ModelOption>(defaultModel);
+  const [showCredentials, setShowCredentials] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const executionLogRef = useRef<ExecutionLogEntry[]>([]);
 
@@ -335,22 +527,38 @@ function App() {
     <div className="chat-container">
       <div className="chat-header">
         <h1>Chat</h1>
-        <select
-          className="model-selector"
-          value={`${selectedModel.providerID}:${selectedModel.modelID}`}
-          onChange={handleModelChange}
-          disabled={isLoading}
-        >
-          {availableModels.map((model) => (
-            <option
-              key={`${model.providerID}:${model.modelID}`}
-              value={`${model.providerID}:${model.modelID}`}
-            >
-              {model.displayName}
-            </option>
-          ))}
-        </select>
+        <div className="header-actions">
+          <select
+            className="model-selector"
+            value={`${selectedModel.providerID}:${selectedModel.modelID}`}
+            onChange={handleModelChange}
+            disabled={isLoading}
+          >
+            {availableModels.map((model) => (
+              <option
+                key={`${model.providerID}:${model.modelID}`}
+                value={`${model.providerID}:${model.modelID}`}
+              >
+                {model.displayName}
+              </option>
+            ))}
+          </select>
+          <button
+            className="settings-button"
+            onClick={() => setShowCredentials(true)}
+            title="API Keys"
+            type="button"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          </button>
+        </div>
       </div>
+      {showCredentials && (
+        <CredentialsPanel onClose={() => setShowCredentials(false)} />
+      )}
       <div className="messages-container">
         {messages.length === 0 && !isLoading && (
           <div className="empty-state">
