@@ -144,6 +144,9 @@ impl OpencodeManager {
             let session_guard = self.session_id.lock().unwrap();
             if let Some(ref sid) = *session_guard {
                 cmd.arg("--session").arg(sid);
+                eprintln!("[opencode] Using existing session: {}", sid);
+            } else {
+                eprintln!("[opencode] Starting new session");
             }
         }
 
@@ -155,6 +158,12 @@ impl OpencodeManager {
         if self.native_tools_path.exists() {
             path_env = format!("{}:{}", self.native_tools_path.display(), path_env);
         }
+
+        eprintln!(
+            "[opencode] Running: {:?} run -m {} --format json <message>",
+            self.opencode_binary, model_id
+        );
+        eprintln!("[opencode] Working directory: {}", self.workspace_path);
 
         cmd.env("PATH", &path_env)
             .env(
@@ -175,10 +184,26 @@ impl OpencodeManager {
             .take()
             .ok_or_else(|| "Failed to capture stdout".to_string())?;
 
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| "Failed to capture stderr".to_string())?;
+
+        // Spawn a thread to read stderr and log it
+        std::thread::spawn(move || {
+            let reader = BufReader::new(stderr);
+            for line in reader.lines() {
+                if let Ok(line) = line {
+                    eprintln!("[opencode stderr] {}", line);
+                }
+            }
+        });
+
         // Read and process output line by line
         let reader = BufReader::new(stdout);
         let mut response_text = String::new();
         let session_id_clone = self.session_id.clone();
+        let mut line_count = 0;
 
         for line in reader.lines() {
             let line = line.map_err(|e| format!("Failed to read line: {}", e))?;
@@ -186,16 +211,29 @@ impl OpencodeManager {
                 continue;
             }
 
+            line_count += 1;
+            eprintln!("[opencode] Line {}: {}", line_count, &line[..line.len().min(200)]);
+
             // Parse the JSON event
             let event: OpencodeEvent = match serde_json::from_str(&line) {
                 Ok(e) => e,
-                Err(_) => continue, // Skip malformed lines
+                Err(e) => {
+                    eprintln!("[opencode] Failed to parse JSON: {}", e);
+                    continue;
+                }
             };
+
+            eprintln!(
+                "[opencode] Event type: {}, has part: {}",
+                event.event_type,
+                event.part.is_some()
+            );
 
             // Capture session ID from first event
             if let Some(ref sid) = event.session_id {
                 let mut session_guard = session_id_clone.lock().unwrap();
                 if session_guard.is_none() {
+                    eprintln!("[opencode] Captured session ID: {}", sid);
                     *session_guard = Some(sid.clone());
                 }
             }
@@ -208,25 +246,34 @@ impl OpencodeManager {
             // Extract text from text events
             if event.event_type == "text" {
                 if let Some(ref part) = event.part {
-                    if part.part_type == "text" {
-                        if let Some(ref text) = part.text {
-                            response_text = text.clone();
-                        }
+                    eprintln!(
+                        "[opencode] Text event - part_type: {}, has text: {}",
+                        part.part_type,
+                        part.text.is_some()
+                    );
+                    if let Some(ref text) = part.text {
+                        eprintln!("[opencode] Got response text ({} chars)", text.len());
+                        response_text = text.clone();
                     }
                 }
             }
         }
+
+        eprintln!("[opencode] Finished reading {} lines", line_count);
 
         // Wait for the process to finish
         let status = child
             .wait()
             .map_err(|e| format!("Failed to wait for opencode: {}", e))?;
 
+        eprintln!("[opencode] Process exited with status: {}", status);
+
         if !status.success() {
             return Err(format!("opencode exited with status: {}", status));
         }
 
         if response_text.is_empty() {
+            eprintln!("[opencode] Warning: No response text captured");
             Ok("No response received.".to_string())
         } else {
             Ok(response_text)
