@@ -1,6 +1,6 @@
 use crate::credentials::CredentialManager;
+use crate::paths::AppPaths;
 use serde::{Deserialize, Serialize};
-use std::env;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -78,46 +78,20 @@ struct ToolTime {
 pub struct OpencodeManager {
     session_id: Arc<Mutex<Option<String>>>,
     workspace_path: String,
-    native_tools_path: PathBuf,
+    paths: AppPaths,
     opencode_binary: PathBuf,
 }
 
 impl OpencodeManager {
     pub async fn new(app: &AppHandle) -> Result<Self, String> {
-        use tauri::Manager;
-
-        // Set up paths - use bundled resources in production, project paths in development
-        let resource_path = app.path().resource_dir().map_err(|e| e.to_string())?;
-        let native_tools_path = resource_path.join("native_tools");
-        let opencode_workspace_path = resource_path.join("opencode_workspace");
-
-        let (native_tools_path, opencode_workspace_path) = if native_tools_path.exists() {
-            (native_tools_path, opencode_workspace_path)
-        } else {
-            let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .parent()
-                .unwrap()
-                .to_path_buf();
-            (
-                project_root.join("native_tools"),
-                project_root.join("opencode_workspace"),
-            )
-        };
-
-        // Find the opencode binary
-        let opencode_binary = native_tools_path.join("opencode");
-        let opencode_binary = if opencode_binary.exists() {
-            opencode_binary
-        } else {
-            PathBuf::from("opencode")
-        };
-
-        let workspace_path = opencode_workspace_path.to_string_lossy().to_string();
+        let paths = AppPaths::new(app)?;
+        let opencode_binary = paths.get_binary_path("opencode");
+        let workspace_path = paths.opencode_workspace_path.to_string_lossy().to_string();
 
         Ok(Self {
             session_id: Arc::new(Mutex::new(None)),
             workspace_path,
-            native_tools_path,
+            paths,
             opencode_binary,
         })
     }
@@ -160,10 +134,7 @@ impl OpencodeManager {
         cmd.arg(message);
 
         // Set up environment
-        let mut path_env = env::var("PATH").unwrap_or_default();
-        if self.native_tools_path.exists() {
-            path_env = format!("{}:{}", self.native_tools_path.display(), path_env);
-        }
+        let path_env = self.paths.get_path_env();
 
         eprintln!(
             "[opencode] Running: {:?} run -m {} --format json <message>",
@@ -174,7 +145,7 @@ impl OpencodeManager {
         cmd.env("PATH", &path_env)
             .env(
                 "PLAYWRIGHT_BROWSERS_PATH",
-                self.native_tools_path.join("playwright_browsers"),
+                self.paths.get_playwright_browsers_path(),
             )
             .current_dir(&self.workspace_path)
             .stdout(Stdio::piped())
