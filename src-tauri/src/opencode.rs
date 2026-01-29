@@ -124,18 +124,23 @@ impl OpencodeManager {
     pub async fn send_message<F>(
         &self,
         message: &str,
-        _provider_id: &str,
+        provider_id: &str,
         model_id: &str,
         status_callback: F,
     ) -> Result<String, String>
     where
         F: Fn(StatusUpdate) + Send + 'static,
     {
+        // Build the model string for opencode: "provider/model"
+        // Also strip date suffixes like "-20251101" from model IDs
+        let model_base = Self::strip_model_date_suffix(model_id);
+        let full_model = format!("{}/{}", provider_id, model_base);
+
         // Build the command
         let mut cmd = Command::new(&self.opencode_binary);
         cmd.arg("run")
             .arg("-m")
-            .arg(model_id)
+            .arg(&full_model)
             .arg("--format")
             .arg("json");
 
@@ -161,7 +166,7 @@ impl OpencodeManager {
 
         eprintln!(
             "[opencode] Running: {:?} run -m {} --format json <message>",
-            self.opencode_binary, model_id
+            self.opencode_binary, full_model
         );
         eprintln!("[opencode] Working directory: {}", self.workspace_path);
 
@@ -390,6 +395,20 @@ impl OpencodeManager {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0)
+    }
+
+    /// Strip date suffixes like "-20251101" from model IDs
+    /// e.g., "claude-opus-4-5-20251101" -> "claude-opus-4-5"
+    fn strip_model_date_suffix(model_id: &str) -> &str {
+        // Look for pattern like "-YYYYMMDD" at the end (8 digits after a dash)
+        if let Some(pos) = model_id.rfind('-') {
+            let suffix = &model_id[pos + 1..];
+            // Check if suffix is exactly 8 digits (a date like 20251101)
+            if suffix.len() == 8 && suffix.chars().all(|c| c.is_ascii_digit()) {
+                return &model_id[..pos];
+            }
+        }
+        model_id
     }
 
     fn get_tool_description(tool_name: &str, title: Option<&str>) -> String {
