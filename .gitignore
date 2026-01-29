@@ -95,4 +95,5 @@ src-tauri/gen/
 # Vite build output
 dist/
 
-/native_tools
+/native_tools/*
+!/native_tools/.gitkeep
