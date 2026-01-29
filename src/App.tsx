@@ -103,13 +103,27 @@ function CredentialsPanel({ onClose }: CredentialsPanelProps) {
     loadCredentials();
   }, []);
 
+  // Handle escape key to close modal
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !editingProvider) {
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [onClose, editingProvider]);
+
   const loadCredentials = async () => {
     try {
       setIsLoading(true);
       setError(null);
+      console.log('[Credentials] Loading credentials...');
       const result = await invoke<CredentialStatus[]>('list_credentials');
+      console.log('[Credentials] Loaded:', result);
       setCredentials(result);
     } catch (err) {
+      console.error('[Credentials] Failed to load:', err);
       setError(`Failed to load credentials: ${err}`);
     } finally {
       setIsLoading(false);
@@ -125,14 +139,17 @@ function CredentialsPanel({ onClose }: CredentialsPanelProps) {
     try {
       setIsSaving(true);
       setError(null);
+      console.log('[Credentials] Saving credential for:', providerId);
       await invoke('save_credential', {
         providerId,
         apiKey: apiKeyInput.trim(),
       });
+      console.log('[Credentials] Save successful');
       setEditingProvider(null);
       setApiKeyInput('');
       await loadCredentials();
     } catch (err) {
+      console.error('[Credentials] Failed to save:', err);
       setError(`Failed to save credential: ${err}`);
     } finally {
       setIsSaving(false);
@@ -142,9 +159,12 @@ function CredentialsPanel({ onClose }: CredentialsPanelProps) {
   const handleDeleteCredential = async (providerId: string) => {
     try {
       setError(null);
+      console.log('[Credentials] Deleting credential for:', providerId);
       await invoke('delete_credential', { providerId });
+      console.log('[Credentials] Delete successful');
       await loadCredentials();
     } catch (err) {
+      console.error('[Credentials] Failed to delete:', err);
       setError(`Failed to delete credential: ${err}`);
     }
   };
@@ -161,95 +181,103 @@ function CredentialsPanel({ onClose }: CredentialsPanelProps) {
     setError(null);
   };
 
-  return (
-    <div className="credentials-panel">
-      <div className="credentials-header">
-        <h2>API Keys</h2>
-        <button className="close-button" onClick={onClose} type="button">
-          &times;
-        </button>
-      </div>
-      <p className="credentials-description">
-        Configure your API keys for each LLM provider. Keys are stored securely in your system keychain.
-      </p>
-      {error && <div className="credentials-error">{error}</div>}
-      {isLoading ? (
-        <div className="credentials-loading">Loading...</div>
-      ) : (
-        <div className="credentials-list">
-          {credentials.map((cred) => {
-            const info = providerInfo[cred.provider_id] || {
-              displayName: cred.provider_id,
-              placeholder: 'Enter API key...',
-            };
-            const isEditing = editingProvider === cred.provider_id;
+  const handleOverlayClick = (e: React.MouseEvent) => {
+    if (e.target === e.currentTarget) {
+      onClose();
+    }
+  };
 
-            return (
-              <div key={cred.provider_id} className="credential-item">
-                <div className="credential-info">
-                  <span className="credential-name">{info.displayName}</span>
-                  <span className={`credential-status ${cred.has_key ? 'has-key' : 'no-key'}`}>
-                    {cred.has_key ? 'Configured' : 'Not configured'}
-                  </span>
-                </div>
-                {isEditing ? (
-                  <div className="credential-edit">
-                    <input
-                      type="password"
-                      value={apiKeyInput}
-                      onChange={(e) => setApiKeyInput(e.target.value)}
-                      placeholder={info.placeholder}
-                      className="credential-input"
-                      autoFocus
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') handleSaveCredential(cred.provider_id);
-                        if (e.key === 'Escape') cancelEditing();
-                      }}
-                    />
+  return (
+    <div className="modal-overlay" onClick={handleOverlayClick}>
+      <div className="credentials-modal">
+        <div className="credentials-header">
+          <h2>API Keys</h2>
+          <button className="close-button" onClick={onClose} type="button">
+            &times;
+          </button>
+        </div>
+        <p className="credentials-description">
+          Configure your API keys for each LLM provider. Keys are stored securely in your system keychain.
+        </p>
+        {error && <div className="credentials-error">{error}</div>}
+        {isLoading ? (
+          <div className="credentials-loading">Loading...</div>
+        ) : (
+          <div className="credentials-list">
+            {credentials.map((cred) => {
+              const info = providerInfo[cred.provider_id] || {
+                displayName: cred.provider_id,
+                placeholder: 'Enter API key...',
+              };
+              const isEditing = editingProvider === cred.provider_id;
+
+              return (
+                <div key={cred.provider_id} className="credential-item">
+                  <div className="credential-info">
+                    <span className="credential-name">{info.displayName}</span>
+                    <span className={`credential-status ${cred.has_key ? 'has-key' : 'no-key'}`}>
+                      {cred.has_key ? 'Configured' : 'Not configured'}
+                    </span>
+                  </div>
+                  {isEditing ? (
+                    <div className="credential-edit">
+                      <input
+                        type="password"
+                        value={apiKeyInput}
+                        onChange={(e) => setApiKeyInput(e.target.value)}
+                        placeholder={info.placeholder}
+                        className="credential-input"
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleSaveCredential(cred.provider_id);
+                          if (e.key === 'Escape') cancelEditing();
+                        }}
+                      />
+                      <div className="credential-actions">
+                        <button
+                          className="save-button"
+                          onClick={() => handleSaveCredential(cred.provider_id)}
+                          disabled={isSaving}
+                          type="button"
+                        >
+                          {isSaving ? 'Saving...' : 'Save'}
+                        </button>
+                        <button
+                          className="cancel-button"
+                          onClick={cancelEditing}
+                          disabled={isSaving}
+                          type="button"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
                     <div className="credential-actions">
                       <button
-                        className="save-button"
-                        onClick={() => handleSaveCredential(cred.provider_id)}
-                        disabled={isSaving}
+                        className="edit-button"
+                        onClick={() => startEditing(cred.provider_id)}
                         type="button"
                       >
-                        {isSaving ? 'Saving...' : 'Save'}
+                        {cred.has_key ? 'Update' : 'Add'}
                       </button>
-                      <button
-                        className="cancel-button"
-                        onClick={cancelEditing}
-                        disabled={isSaving}
-                        type="button"
-                      >
-                        Cancel
-                      </button>
+                      {cred.has_key && (
+                        <button
+                          className="delete-button"
+                          onClick={() => handleDeleteCredential(cred.provider_id)}
+                          type="button"
+                        >
+                          Remove
+                        </button>
+                      )}
                     </div>
-                  </div>
-                ) : (
-                  <div className="credential-actions">
-                    <button
-                      className="edit-button"
-                      onClick={() => startEditing(cred.provider_id)}
-                      type="button"
-                    >
-                      {cred.has_key ? 'Update' : 'Add'}
-                    </button>
-                    {cred.has_key && (
-                      <button
-                        className="delete-button"
-                        onClick={() => handleDeleteCredential(cred.provider_id)}
-                        type="button"
-                      >
-                        Remove
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
