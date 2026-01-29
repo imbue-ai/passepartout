@@ -376,10 +376,16 @@ impl OpencodeManager {
             return Err(format!("API error ({}): {}", status, body));
         }
 
-        let prompt_response: PromptResponse = response
-            .json()
+        // Get the response body as text first for debugging
+        let response_text = response
+            .text()
             .await
-            .map_err(|e| format!("Failed to parse response: {}", e))?;
+            .map_err(|e| format!("Failed to read response body: {}", e))?;
+
+        println!("[OpenCode] Response body: {}", &response_text[..response_text.len().min(500)]);
+
+        let prompt_response: PromptResponse = serde_json::from_str(&response_text)
+            .map_err(|e| format!("Failed to parse response: {}. Body: {}", e, &response_text[..response_text.len().min(200)]))?;
 
         // Cancel the event subscription
         event_handle.abort();
