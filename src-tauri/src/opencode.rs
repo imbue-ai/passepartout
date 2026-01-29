@@ -193,6 +193,8 @@ impl OpencodeManager {
         println!("[OpenCode] Binary path: {:?} (exists: {})", opencode_binary, opencode_binary.exists());
 
         // Start the OpenCode server
+        // Note: Don't set current_dir - the opencode binary has its own directory requirements.
+        // The workspace directory is passed via X-Opencode-Directory header when creating sessions.
         println!("[OpenCode] Starting server with args: server --port {}", port);
         let mut server_process = Command::new(&opencode_binary)
             .args(["server", "--port", &port.to_string()])
@@ -203,7 +205,6 @@ impl OpencodeManager {
                 "PLAYWRIGHT_BROWSERS_PATH",
                 native_tools_path.join("playwright_browsers"),
             )
-            .current_dir(&opencode_workspace_path)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
