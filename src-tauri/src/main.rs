@@ -48,30 +48,62 @@ struct CredentialStatus {
 /// Save an API key for a provider to the system keychain
 #[tauri::command]
 fn save_credential(provider_id: String, api_key: String) -> Result<(), String> {
+    println!("[credentials] Saving credential for provider: {}", provider_id);
     let provider = Provider::from_str(&provider_id)
         .ok_or_else(|| format!("Unknown provider: {}", provider_id))?;
-    CredentialManager::save_credential(provider, &api_key)
+    match CredentialManager::save_credential(provider, &api_key) {
+        Ok(()) => {
+            println!("[credentials] Successfully saved credential for: {}", provider_id);
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("[credentials] Failed to save credential for {}: {}", provider_id, e);
+            Err(e)
+        }
+    }
 }
 
 /// Delete an API key for a provider from the system keychain
 #[tauri::command]
 fn delete_credential(provider_id: String) -> Result<(), String> {
+    println!("[credentials] Deleting credential for provider: {}", provider_id);
     let provider = Provider::from_str(&provider_id)
         .ok_or_else(|| format!("Unknown provider: {}", provider_id))?;
-    CredentialManager::delete_credential(provider)
+    match CredentialManager::delete_credential(provider) {
+        Ok(()) => {
+            println!("[credentials] Successfully deleted credential for: {}", provider_id);
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("[credentials] Failed to delete credential for {}: {}", provider_id, e);
+            Err(e)
+        }
+    }
 }
 
 /// Get the status of all credentials (which providers have keys stored)
 #[tauri::command]
 fn list_credentials() -> Result<Vec<CredentialStatus>, String> {
-    let credentials = CredentialManager::list_credentials()?;
-    Ok(credentials
-        .into_iter()
-        .map(|(provider_id, has_key)| CredentialStatus {
-            provider_id,
-            has_key,
-        })
-        .collect())
+    println!("[credentials] Listing all credentials");
+    match CredentialManager::list_credentials() {
+        Ok(credentials) => {
+            println!("[credentials] Found {} providers", credentials.len());
+            for (provider_id, has_key) in &credentials {
+                println!("[credentials] - {}: has_key={}", provider_id, has_key);
+            }
+            Ok(credentials
+                .into_iter()
+                .map(|(provider_id, has_key)| CredentialStatus {
+                    provider_id,
+                    has_key,
+                })
+                .collect())
+        }
+        Err(e) => {
+            eprintln!("[credentials] Failed to list credentials: {}", e);
+            Err(e)
+        }
+    }
 }
 
 fn main() {
