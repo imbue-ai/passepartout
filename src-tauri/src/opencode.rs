@@ -303,7 +303,7 @@ impl OpencodeManager {
         println!("OpenCode server started on {}", base_url);
 
         // Create a session
-        let session_response: SessionCreateResponse = client
+        let session_resp = client
             .post(format!("{}/api/session", base_url))
             .header("Authorization", &auth_header)
             .header("Content-Type", "application/json")
@@ -311,10 +311,22 @@ impl OpencodeManager {
             .json(&serde_json::json!({ "title": "Chat Session" }))
             .send()
             .await
-            .map_err(|e| format!("Failed to create session: {}", e))?
-            .json()
+            .map_err(|e| format!("Failed to create session: {}", e))?;
+
+        let session_status = session_resp.status();
+        let session_body = session_resp
+            .text()
             .await
-            .map_err(|e| format!("Failed to parse session response: {}", e))?;
+            .map_err(|e| format!("Failed to read session response body: {}", e))?;
+
+        println!("[OpenCode] Session create response ({}): {}", session_status, &session_body[..session_body.len().min(500)]);
+
+        if !session_status.is_success() {
+            return Err(format!("Failed to create session ({}): {}", session_status, session_body));
+        }
+
+        let session_response: SessionCreateResponse = serde_json::from_str(&session_body)
+            .map_err(|e| format!("Failed to parse session response: {}. Body: {}", e, &session_body[..session_body.len().min(200)]))?;
 
         println!("OpenCode session created: {}", session_response.id);
 
