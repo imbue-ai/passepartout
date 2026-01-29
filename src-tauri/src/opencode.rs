@@ -2,20 +2,19 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use rand::Rng;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
-use tauri::AppHandle;
-use tauri::Manager;
+use tauri::{AppHandle, Manager};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StatusUpdateDetails {
     #[serde(rename = "fullMessage", skip_serializing_if = "Option::is_none")]
     pub full_message: Option<String>,
     #[serde(rename = "toolName", skip_serializing_if = "Option::is_none")]
     pub tool_name: Option<String>,
+    #[serde(default)]
     pub timestamp: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input: Option<serde_json::Value>,
@@ -138,8 +137,6 @@ pub struct OpencodeManager {
 
 impl OpencodeManager {
     pub async fn new(app: &AppHandle) -> Result<Self, String> {
-        println!("[OpenCode] Starting initialization...");
-
         // Generate random credentials
         let username = "passepartout";
         let password: String = rand::thread_rng()
@@ -151,34 +148,18 @@ impl OpencodeManager {
         // Find an available port
         let port = portpicker::pick_unused_port().ok_or("Could not find an available port")?;
         let base_url = format!("http://127.0.0.1:{}", port);
-        println!("[OpenCode] Selected port: {}", port);
 
-        // Set up paths
+        // Set up paths - use bundled resources in production, project paths in development
         let resource_path = app.path().resource_dir().map_err(|e| e.to_string())?;
-        println!("[OpenCode] Resource path: {:?}", resource_path);
         let native_tools_path = resource_path.join("native_tools");
         let opencode_workspace_path = resource_path.join("opencode_workspace");
 
-        // Check if we're in development mode (resource paths don't exist)
-        let (native_tools_path, opencode_workspace_path) = if !native_tools_path.exists() {
-            println!("[OpenCode] Development mode detected (resource paths don't exist)");
-            // Development mode - use paths relative to the project
-            let dev_native_tools = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .parent()
-                .unwrap()
-                .join("native_tools");
-            let dev_workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .parent()
-                .unwrap()
-                .join("opencode_workspace");
-            (dev_native_tools, dev_workspace)
-        } else {
-            println!("[OpenCode] Production mode (using bundled resources)");
+        let (native_tools_path, opencode_workspace_path) = if native_tools_path.exists() {
             (native_tools_path, opencode_workspace_path)
+        } else {
+            let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf();
+            (project_root.join("native_tools"), project_root.join("opencode_workspace"))
         };
-
-        println!("[OpenCode] Native tools path: {:?} (exists: {})", native_tools_path, native_tools_path.exists());
-        println!("[OpenCode] Workspace path: {:?} (exists: {})", opencode_workspace_path, opencode_workspace_path.exists());
 
         // Set up environment for the OpenCode server
         let mut path_env = env::var("PATH").unwrap_or_default();
@@ -187,19 +168,15 @@ impl OpencodeManager {
         }
 
         // Find the opencode binary
-        let opencode_binary = if native_tools_path.join("opencode").exists() {
-            native_tools_path.join("opencode")
+        let opencode_binary = native_tools_path.join("opencode");
+        let opencode_binary = if opencode_binary.exists() {
+            opencode_binary
         } else {
-            // Try to find it in PATH
             PathBuf::from("opencode")
         };
-        println!("[OpenCode] Binary path: {:?} (exists: {})", opencode_binary, opencode_binary.exists());
 
         // Start the OpenCode server
-        // Note: Don't set current_dir - the opencode binary has its own directory requirements.
-        // The workspace directory is passed via X-Opencode-Directory header when creating sessions.
-        println!("[OpenCode] Starting server with args: serve --port {}", port);
-        let mut server_process = Command::new(&opencode_binary)
+        let server_process = Command::new(&opencode_binary)
             .args(["serve", "--port", &port.to_string()])
             .env("PATH", &path_env)
             .env("OPENCODE_SERVER_USERNAME", &username)
@@ -213,8 +190,6 @@ impl OpencodeManager {
             .spawn()
             .map_err(|e| format!("Failed to start OpenCode server: {}", e))?;
 
-        println!("[OpenCode] Server process spawned with PID: {:?}", server_process.id());
-
         // Create HTTP client
         let client = Client::builder()
             .timeout(Duration::from_secs(300))
@@ -224,41 +199,19 @@ impl OpencodeManager {
         let auth_header = format!("Basic {}", BASE64.encode(format!("{}:{}", username, password)));
 
         // Wait for the server to be ready using health check
-        let mut retries = 0;
-        let max_retries = 60;
-        loop {
-            match client
-                .get(format!("{}/global/health", base_url))
+        for retry in 0..60 {
+            match client.get(format!("{}/global/health", base_url))
                 .header("Authorization", &auth_header)
                 .send()
                 .await
             {
-                Ok(resp) if resp.status().is_success() => {
-                    println!("[OpenCode] Health check passed after {} retries", retries);
-                    break;
-                }
-                Ok(resp) => {
-                    println!("[OpenCode] Health check returned status: {}", resp.status());
-                }
-                Err(e) => {
-                    if retries % 10 == 0 {
-                        println!("[OpenCode] Health check attempt {}/{}: {}", retries, max_retries, e);
-                    }
-                }
+                Ok(resp) if resp.status().is_success() => break,
+                _ if retry == 59 => return Err("OpenCode server failed to start after 60 retries".to_string()),
+                _ => tokio::time::sleep(Duration::from_millis(500)).await,
             }
-
-            retries += 1;
-            if retries >= max_retries {
-                return Err(format!("OpenCode server failed to start after {} retries", max_retries));
-            }
-            tokio::time::sleep(Duration::from_millis(500)).await;
         }
 
-        println!("[OpenCode] Server started on {}", base_url);
-
-        // Store the workspace path as a string for later use
         let workspace_path = opencode_workspace_path.to_string_lossy().to_string();
-        println!("[OpenCode] Using workspace path: {}", workspace_path);
 
         // Create a session
         let session_resp = client
@@ -271,22 +224,15 @@ impl OpencodeManager {
             .await
             .map_err(|e| format!("Failed to create session: {}", e))?;
 
-        let session_status = session_resp.status();
-        let session_body = session_resp
-            .text()
-            .await
-            .map_err(|e| format!("Failed to read session response body: {}", e))?;
-
-        println!("[OpenCode] Session create response ({}): {}", session_status, &session_body[..session_body.len().min(500)]);
-
-        if !session_status.is_success() {
-            return Err(format!("Failed to create session ({}): {}", session_status, session_body));
+        if !session_resp.status().is_success() {
+            let body = session_resp.text().await.unwrap_or_default();
+            return Err(format!("Failed to create session: {}", body));
         }
 
-        let session_response: SessionCreateResponse = serde_json::from_str(&session_body)
-            .map_err(|e| format!("Failed to parse session response: {}. Body: {}", e, &session_body[..session_body.len().min(200)]))?;
-
-        println!("OpenCode session created: {}", session_response.id);
+        let session_response: SessionCreateResponse = session_resp
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse session response: {}", e))?;
 
         Ok(Self {
             client,
@@ -313,10 +259,9 @@ impl OpencodeManager {
         let base_url = self.base_url.clone();
         let auth_header = self.auth_header.clone();
         let session_id = self.session_id.clone();
-        let session_id_for_events = session_id.clone();
 
         let event_handle = tokio::spawn(async move {
-            Self::subscribe_to_events(client, base_url, auth_header, session_id_for_events, status_callback).await;
+            Self::subscribe_to_events(client, base_url, auth_header, session_id, status_callback).await;
         });
 
         // Send the prompt
@@ -348,16 +293,10 @@ impl OpencodeManager {
             return Err(format!("API error ({}): {}", status, body));
         }
 
-        // Get the response body as text first for debugging
-        let response_text = response
-            .text()
+        let prompt_response: PromptResponse = response
+            .json()
             .await
-            .map_err(|e| format!("Failed to read response body: {}", e))?;
-
-        println!("[OpenCode] Response body: {}", &response_text[..response_text.len().min(500)]);
-
-        let prompt_response: PromptResponse = serde_json::from_str(&response_text)
-            .map_err(|e| format!("Failed to parse response: {}. Body: {}", e, &response_text[..response_text.len().min(200)]))?;
+            .map_err(|e| format!("Failed to parse response: {}", e))?;
 
         // Cancel the event subscription
         event_handle.abort();
@@ -449,51 +388,20 @@ impl OpencodeManager {
                 }
 
                 let status = props.status.as_ref()?;
-                match status.status_type.as_str() {
-                    "busy" => Some(StatusUpdate {
-                        update_type: "busy".to_string(),
-                        message: Some("Thinking...".to_string()),
-                        details: Some(StatusUpdateDetails {
-                            full_message: None,
-                            tool_name: None,
-                            timestamp: Self::now_millis(),
-                            input: None,
-                            output: None,
-                            error: None,
-                            duration: None,
-                        }),
+                let (update_type, message) = match status.status_type.as_str() {
+                    "busy" => ("busy", Some("Thinking...".to_string())),
+                    "idle" => ("idle", None),
+                    "retry" => ("retry", Some(format!("Retrying (attempt {})...", status.attempt.unwrap_or(1)))),
+                    _ => return None,
+                };
+                Some(StatusUpdate {
+                    update_type: update_type.to_string(),
+                    message,
+                    details: Some(StatusUpdateDetails {
+                        timestamp: Self::now_millis(),
+                        ..Default::default()
                     }),
-                    "idle" => Some(StatusUpdate {
-                        update_type: "idle".to_string(),
-                        message: None,
-                        details: Some(StatusUpdateDetails {
-                            full_message: None,
-                            tool_name: None,
-                            timestamp: Self::now_millis(),
-                            input: None,
-                            output: None,
-                            error: None,
-                            duration: None,
-                        }),
-                    }),
-                    "retry" => Some(StatusUpdate {
-                        update_type: "retry".to_string(),
-                        message: Some(format!(
-                            "Retrying (attempt {})...",
-                            status.attempt.unwrap_or(1)
-                        )),
-                        details: Some(StatusUpdateDetails {
-                            full_message: None,
-                            tool_name: None,
-                            timestamp: Self::now_millis(),
-                            input: None,
-                            output: None,
-                            error: None,
-                            duration: None,
-                        }),
-                    }),
-                    _ => None,
-                }
+                })
             }
             "message.part.updated" => {
                 let part = props.part.as_ref()?;
@@ -510,133 +418,81 @@ impl OpencodeManager {
 
                         match status_str.as_str() {
                             "running" => {
-                                let description =
-                                    Self::get_tool_description(tool_name, state.title.as_deref());
-                                let input_summary_truncated =
-                                    Self::format_tool_input_for_status(tool_name, &state.input);
-                                let input_summary_full =
-                                    Self::format_tool_input_for_log(tool_name, &state.input);
+                                let description = Self::get_tool_description(tool_name, state.title.as_deref());
+                                let input_short = Self::format_tool_input_for_status(tool_name, &state.input);
+                                let input_full = Self::format_tool_input_for_log(tool_name, &state.input);
 
-                                let message = if input_summary_truncated.is_empty() {
-                                    description.clone()
-                                } else {
-                                    format!("{}: {}", description, input_summary_truncated)
-                                };
-
-                                let full_message = if input_summary_full.is_empty() {
-                                    description
-                                } else {
-                                    format!("{}: {}", description, input_summary_full)
+                                let format_with_input = |desc: &str, input: &str| {
+                                    if input.is_empty() { desc.to_string() } else { format!("{}: {}", desc, input) }
                                 };
 
                                 Some(StatusUpdate {
                                     update_type: "tool".to_string(),
-                                    message: Some(message),
+                                    message: Some(format_with_input(&description, &input_short)),
                                     details: Some(StatusUpdateDetails {
-                                        full_message: Some(full_message),
+                                        full_message: Some(format_with_input(&description, &input_full)),
                                         tool_name: Some(tool_name.clone()),
                                         timestamp: Self::now_millis(),
                                         input: state.input.clone(),
-                                        output: None,
-                                        error: None,
-                                        duration: None,
+                                        ..Default::default()
                                     }),
                                 })
                             }
-                            "completed" => {
-                                let duration = state
-                                    .time
-                                    .as_ref()
-                                    .and_then(|t| Some(t.end? - t.start?));
-                                let description =
-                                    Self::get_tool_description(tool_name, state.title.as_deref());
+                            "completed" | "error" => {
+                                let duration = state.time.as_ref().and_then(|t| Some(t.end? - t.start?));
+                                let description = Self::get_tool_description(tool_name, state.title.as_deref());
+                                let is_error = status_str == "error";
+
+                                let (update_type, message) = if is_error {
+                                    ("tool-error", format!("Error: {}", state.error.as_deref().unwrap_or("Unknown error")))
+                                } else {
+                                    ("tool-completed", format!("{} completed", description))
+                                };
 
                                 Some(StatusUpdate {
-                                    update_type: "tool-completed".to_string(),
-                                    message: Some(format!("{} completed", description)),
+                                    update_type: update_type.to_string(),
+                                    message: Some(message),
                                     details: Some(StatusUpdateDetails {
-                                        full_message: None,
                                         tool_name: Some(tool_name.clone()),
                                         timestamp: Self::now_millis(),
-                                        input: None,
-                                        output: state.output.clone(),
-                                        error: None,
+                                        output: if is_error { None } else { state.output.clone() },
+                                        error: if is_error { state.error.clone() } else { None },
                                         duration,
-                                    }),
-                                })
-                            }
-                            "error" => {
-                                let duration = state
-                                    .time
-                                    .as_ref()
-                                    .and_then(|t| Some(t.end? - t.start?));
-
-                                Some(StatusUpdate {
-                                    update_type: "tool-error".to_string(),
-                                    message: Some(format!(
-                                        "Error: {}",
-                                        state.error.as_deref().unwrap_or("Unknown error")
-                                    )),
-                                    details: Some(StatusUpdateDetails {
-                                        full_message: None,
-                                        tool_name: Some(tool_name.clone()),
-                                        timestamp: Self::now_millis(),
-                                        input: None,
-                                        output: None,
-                                        error: state.error.clone(),
-                                        duration,
+                                        ..Default::default()
                                     }),
                                 })
                             }
                             _ => None,
                         }
                     }
-                    "reasoning" => Some(StatusUpdate {
-                        update_type: "reasoning".to_string(),
-                        message: Some("Reasoning...".to_string()),
-                        details: Some(StatusUpdateDetails {
-                            full_message: None,
-                            tool_name: None,
-                            timestamp: Self::now_millis(),
-                            input: None,
-                            output: None,
-                            error: None,
-                            duration: None,
-                        }),
-                    }),
-                    "text" => Some(StatusUpdate {
-                        update_type: "generating".to_string(),
-                        message: Some("Generating response...".to_string()),
-                        details: Some(StatusUpdateDetails {
-                            full_message: None,
-                            tool_name: None,
-                            timestamp: Self::now_millis(),
-                            input: None,
-                            output: None,
-                            error: None,
-                            duration: None,
-                        }),
-                    }),
+                    "reasoning" | "text" => {
+                        let (update_type, message) = if part.part_type == "reasoning" {
+                            ("reasoning", "Reasoning...")
+                        } else {
+                            ("generating", "Generating response...")
+                        };
+                        Some(StatusUpdate {
+                            update_type: update_type.to_string(),
+                            message: Some(message.to_string()),
+                            details: Some(StatusUpdateDetails {
+                                timestamp: Self::now_millis(),
+                                ..Default::default()
+                            }),
+                        })
+                    }
                     _ => None,
                 }
             }
             "session.idle" => {
-                let event_session_id = props.session_id.as_ref()?;
-                if event_session_id != session_id {
+                if props.session_id.as_ref()? != session_id {
                     return None;
                 }
-
                 Some(StatusUpdate {
                     update_type: "idle".to_string(),
                     message: None,
                     details: Some(StatusUpdateDetails {
-                        full_message: None,
-                        tool_name: None,
                         timestamp: Self::now_millis(),
-                        input: None,
-                        output: None,
-                        error: None,
-                        duration: None,
+                        ..Default::default()
                     }),
                 })
             }
@@ -656,24 +512,19 @@ impl OpencodeManager {
             return t.to_string();
         }
 
-        let descriptions: HashMap<&str, &str> = [
-            ("read", "Reading file"),
-            ("write", "Writing file"),
-            ("edit", "Editing file"),
-            ("bash", "Running command"),
-            ("glob", "Searching files"),
-            ("grep", "Searching content"),
-            ("list_directory", "Listing directory"),
-            ("web_search", "Searching the web"),
-            ("web_fetch", "Fetching webpage"),
-        ]
-        .into_iter()
-        .collect();
-
-        descriptions
-            .get(tool_name.to_lowercase().as_str())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| format!("Running {}", tool_name))
+        match tool_name.to_lowercase().as_str() {
+            "read" => "Reading file",
+            "write" => "Writing file",
+            "edit" => "Editing file",
+            "bash" => "Running command",
+            "glob" => "Searching files",
+            "grep" => "Searching content",
+            "list_directory" => "Listing directory",
+            "web_search" => "Searching the web",
+            "web_fetch" => "Fetching webpage",
+            _ => return format!("Running {}", tool_name),
+        }
+        .to_string()
     }
 
     fn truncate_for_status(text: &str, max_length: usize) -> String {
