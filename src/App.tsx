@@ -63,6 +63,14 @@ type ModelOption = {
   displayName: string;
 };
 
+// Browser check state
+type BrowserCheckStatus = 'loading' | 'success' | 'error';
+
+interface BrowserCheckResult {
+  success: boolean;
+  output: string;
+}
+
 // Available models configuration
 const availableModels: ModelOption[] = [
   // Anthropic models
@@ -362,6 +370,9 @@ function App() {
   const [expandedLogs, setExpandedLogs] = useState<Set<number>>(new Set());
   const [selectedModel, setSelectedModel] = useState<ModelOption>(defaultModel);
   const [showCredentials, setShowCredentials] = useState(false);
+  const [browserCheckStatus, setBrowserCheckStatus] = useState<BrowserCheckStatus>('loading');
+  const [browserCheckOutput, setBrowserCheckOutput] = useState<string>('');
+  const [showBrowserPopup, setShowBrowserPopup] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const executionLogRef = useRef<ExecutionLogEntry[]>([]);
 
@@ -416,6 +427,25 @@ function App() {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Run browser check on app startup
+  useEffect(() => {
+    const checkBrowser = async () => {
+      try {
+        console.log('[Browser] Starting browser check...');
+        const result = await invoke<BrowserCheckResult>('ensure_browser');
+        console.log('[Browser] Check completed:', result);
+        setBrowserCheckOutput(result.output);
+        setBrowserCheckStatus(result.success ? 'success' : 'error');
+      } catch (err) {
+        console.error('[Browser] Check failed:', err);
+        setBrowserCheckOutput(`Failed to check browser: ${err}`);
+        setBrowserCheckStatus('error');
+      }
+    };
+
+    checkBrowser();
+  }, []);
 
   // Subscribe to status updates from the Tauri backend
   useEffect(() => {
@@ -551,11 +581,39 @@ function App() {
     );
   };
 
+  // Render browser status icon
+  const renderBrowserStatusIcon = () => {
+    if (browserCheckStatus === 'loading') {
+      return (
+        <div className="browser-status-icon loading" title="Checking browser...">
+          <div className="browser-spinner" />
+        </div>
+      );
+    }
+
+    const isSuccess = browserCheckStatus === 'success';
+    return (
+      <button
+        className={`browser-status-icon ${isSuccess ? 'success' : 'error'}`}
+        onClick={() => setShowBrowserPopup(true)}
+        title={isSuccess ? 'Browser ready - click for details' : 'Browser check failed - click for details'}
+        type="button"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10" />
+          <line x1="12" y1="16" x2="12" y2="12" />
+          <line x1="12" y1="8" x2="12.01" y2="8" />
+        </svg>
+      </button>
+    );
+  };
+
   return (
     <div className="chat-container">
       <div className="chat-header">
-        <h1>Chat</h1>
+        <h1>Passepartout</h1>
         <div className="header-actions">
+          {renderBrowserStatusIcon()}
           <select
             className="model-selector"
             value={`${selectedModel.providerID}:${selectedModel.modelID}`}
@@ -584,6 +642,24 @@ function App() {
           </button>
         </div>
       </div>
+      {showBrowserPopup && (
+        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setShowBrowserPopup(false)}>
+          <div className="browser-popup">
+            <div className="browser-popup-header">
+              <h2>Browser Status</h2>
+              <button className="close-button" onClick={() => setShowBrowserPopup(false)} type="button">
+                &times;
+              </button>
+            </div>
+            <div className={`browser-popup-status ${browserCheckStatus}`}>
+              {browserCheckStatus === 'success' ? 'Browser is ready' : 'Browser check failed'}
+            </div>
+            <div className="browser-popup-output">
+              <pre>{browserCheckOutput || 'No output'}</pre>
+            </div>
+          </div>
+        </div>
+      )}
       {showCredentials && (
         <CredentialsPanel onClose={() => setShowCredentials(false)} />
       )}
