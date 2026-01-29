@@ -29,14 +29,6 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
 RUN echo 'export PATH="/root/.cargo/bin:$PATH"' >> "${BASH_ENV}"
 
-# Install Tauri system dependencies (for Linux)
-RUN apt-get update && apt-get install -y \
-    libwebkit2gtk-4.1-dev \
-    libappindicator3-dev \
-    librsvg2-dev \
-    patchelf \
-    && rm -rf /var/lib/apt/lists/*
-
 # Verify Rust installation
 RUN rustc --version && cargo --version
 # ===================================
