@@ -1,8 +1,8 @@
 {
-  "name": "chat-app",
-  "productName": "chat-app",
+  "name": "passepartout",
+  "productName": "Passepartout",
   "version": "1.0.0",
-  "description": "A Tauri chat application",
+  "description": "A demo app for Latchkey",
   "type": "module",
   "private": true,
   "scripts": {

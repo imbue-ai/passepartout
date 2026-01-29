@@ -1,7 +1,7 @@
 [package]
-name = "chat-app"
+name = "passepartout"
 version = "1.0.0"
-description = "A Tauri chat application"
+description = "A demo app for Latchkey"
 authors = ["Qi Xiao <me@xiaq.me>"]
 license = "MIT"
 repository = ""
