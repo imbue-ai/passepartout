@@ -253,7 +253,7 @@ impl OpencodeManager {
             }
 
             match client
-                .get(format!("{}/health", base_url))
+                .get(format!("{}/api/health", base_url))
                 .header("Authorization", &auth_header)
                 .send()
                 .await
@@ -304,7 +304,7 @@ impl OpencodeManager {
 
         // Create a session
         let session_response: SessionCreateResponse = client
-            .post(format!("{}/session", base_url))
+            .post(format!("{}/api/session", base_url))
             .header("Authorization", &auth_header)
             .header("Content-Type", "application/json")
             .header("X-Opencode-Directory", opencode_workspace_path.to_string_lossy().to_string())
@@ -362,7 +362,7 @@ impl OpencodeManager {
 
         let response = self
             .client
-            .post(format!("{}/session/{}/prompt", self.base_url, self.session_id))
+            .post(format!("{}/api/session/{}/message", self.base_url, self.session_id))
             .header("Authorization", &self.auth_header)
             .header("Content-Type", "application/json")
             .json(&request)
@@ -418,7 +418,7 @@ impl OpencodeManager {
         F: Fn(StatusUpdate) + Send + 'static,
     {
         let response = match client
-            .get(format!("{}/event", base_url))
+            .get(format!("{}/api/event", base_url))
             .header("Authorization", &auth_header)
             .header("Accept", "text/event-stream")
             .send()
