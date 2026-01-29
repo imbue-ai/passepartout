@@ -3,7 +3,7 @@
 
 mod opencode;
 
-use opencode::{OpencodeManager, StatusUpdate};
+use opencode::OpencodeManager;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::Mutex;
