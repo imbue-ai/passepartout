@@ -32,3 +32,14 @@ RUN echo 'export PATH="/root/.cargo/bin:$PATH"' >> "${BASH_ENV}"
 # Verify Rust installation
 RUN rustc --version && cargo --version
 # ===================================
+
+# Tauri Linux dependencies
+# ========================
+RUN apt-get update && apt-get install -y \
+    libgtk-3-dev \
+    libwebkit2gtk-4.1-dev \
+    libappindicator3-dev \
+    librsvg2-dev \
+    patchelf \
+    && rm -rf /var/lib/apt/lists/*
+# ========================
