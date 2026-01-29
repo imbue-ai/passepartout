@@ -197,7 +197,7 @@ impl OpencodeManager {
         // The workspace directory is passed via X-Opencode-Directory header when creating sessions.
         println!("[OpenCode] Starting server with args: server --port {}", port);
         let mut server_process = Command::new(&opencode_binary)
-            .args(["server", "--port", &port.to_string()])
+            .args(["serve", "--port", &port.to_string()])
             .env("PATH", &path_env)
             .env("OPENCODE_SERVER_USERNAME", &username)
             .env("OPENCODE_SERVER_PASSWORD", &password)
