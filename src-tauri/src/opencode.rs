@@ -1,12 +1,10 @@
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use rand::Rng;
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::env;
+use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
-use std::time::Duration;
-use tauri::{AppHandle, Manager};
+use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex};
+use tauri::AppHandle;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StatusUpdateDetails {
@@ -36,70 +34,28 @@ pub struct StatusUpdate {
     pub details: Option<StatusUpdateDetails>,
 }
 
+/// JSON output from `opencode run --format json`
 #[derive(Debug, Deserialize)]
-struct SessionCreateResponse {
-    id: String,
-}
-
-#[derive(Debug, Serialize)]
-struct PromptPart {
+struct OpencodeEvent {
     #[serde(rename = "type")]
-    part_type: String,
-    text: String,
-}
-
-#[derive(Debug, Serialize)]
-struct ModelConfig {
-    #[serde(rename = "providerID")]
-    provider_id: String,
-    #[serde(rename = "modelID")]
-    model_id: String,
-}
-
-#[derive(Debug, Serialize)]
-struct PromptRequest {
-    parts: Vec<PromptPart>,
-    model: ModelConfig,
-}
-
-#[derive(Debug, Deserialize)]
-struct PromptResponsePart {
-    #[serde(rename = "type")]
-    part_type: String,
-    #[serde(default)]
-    text: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct PromptResponse {
-    #[allow(dead_code)]
-    info: Option<serde_json::Value>,
-    parts: Option<Vec<PromptResponsePart>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct EventProperties {
+    event_type: String,
     #[serde(rename = "sessionID")]
     session_id: Option<String>,
-    status: Option<EventStatus>,
     part: Option<EventPart>,
-}
-
-#[derive(Debug, Deserialize)]
-struct EventStatus {
-    #[serde(rename = "type")]
-    status_type: String,
-    attempt: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
 struct EventPart {
     #[serde(rename = "type")]
     part_type: String,
-    #[serde(rename = "sessionID")]
-    session_id: Option<String>,
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
     tool: Option<String>,
+    #[serde(default)]
     state: Option<ToolState>,
+    #[serde(default)]
+    reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -118,36 +74,16 @@ struct ToolTime {
     end: Option<u64>,
 }
 
-#[derive(Debug, Deserialize)]
-struct Event {
-    #[serde(rename = "type")]
-    event_type: String,
-    properties: Option<EventProperties>,
-}
-
 pub struct OpencodeManager {
-    client: Client,
-    base_url: String,
-    auth_header: String,
-    session_id: String,
+    session_id: Arc<Mutex<Option<String>>>,
     workspace_path: String,
-    #[allow(dead_code)]
-    server_process: Option<Child>,
+    native_tools_path: PathBuf,
+    opencode_binary: PathBuf,
 }
 
 impl OpencodeManager {
     pub async fn new(app: &AppHandle) -> Result<Self, String> {
-        // Generate random credentials
-        let username = "passepartout";
-        let password: String = rand::thread_rng()
-            .sample_iter(&rand::distributions::Alphanumeric)
-            .take(64)
-            .map(char::from)
-            .collect();
-
-        // Find an available port
-        let port = portpicker::pick_unused_port().ok_or("Could not find an available port")?;
-        let base_url = format!("http://127.0.0.1:{}", port);
+        use tauri::Manager;
 
         // Set up paths - use bundled resources in production, project paths in development
         let resource_path = app.path().resource_dir().map_err(|e| e.to_string())?;
@@ -157,15 +93,15 @@ impl OpencodeManager {
         let (native_tools_path, opencode_workspace_path) = if native_tools_path.exists() {
             (native_tools_path, opencode_workspace_path)
         } else {
-            let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf();
-            (project_root.join("native_tools"), project_root.join("opencode_workspace"))
+            let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .unwrap()
+                .to_path_buf();
+            (
+                project_root.join("native_tools"),
+                project_root.join("opencode_workspace"),
+            )
         };
-
-        // Set up environment for the OpenCode server
-        let mut path_env = env::var("PATH").unwrap_or_default();
-        if native_tools_path.exists() {
-            path_env = format!("{}:{}", native_tools_path.display(), path_env);
-        }
 
         // Find the opencode binary
         let opencode_binary = native_tools_path.join("opencode");
@@ -175,323 +111,225 @@ impl OpencodeManager {
             PathBuf::from("opencode")
         };
 
-        // Start the OpenCode server
-        let server_process = Command::new(&opencode_binary)
-            .args(["serve", "--port", &port.to_string()])
-            .env("PATH", &path_env)
-            .env("OPENCODE_SERVER_USERNAME", &username)
-            .env("OPENCODE_SERVER_PASSWORD", &password)
-            .env(
-                "PLAYWRIGHT_BROWSERS_PATH",
-                native_tools_path.join("playwright_browsers"),
-            )
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| format!("Failed to start OpenCode server: {}", e))?;
-
-        // Create HTTP client
-        let client = Client::builder()
-            .timeout(Duration::from_secs(300))
-            .build()
-            .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
-
-        let auth_header = format!("Basic {}", BASE64.encode(format!("{}:{}", username, password)));
-
-        // Wait for the server to be ready using health check
-        for retry in 0..60 {
-            match client.get(format!("{}/global/health", base_url))
-                .header("Authorization", &auth_header)
-                .send()
-                .await
-            {
-                Ok(resp) if resp.status().is_success() => break,
-                _ if retry == 59 => return Err("OpenCode server failed to start after 60 retries".to_string()),
-                _ => tokio::time::sleep(Duration::from_millis(500)).await,
-            }
-        }
-
         let workspace_path = opencode_workspace_path.to_string_lossy().to_string();
 
-        // Create a session
-        let session_resp = client
-            .post(format!("{}/session", base_url))
-            .header("Authorization", &auth_header)
-            .header("Content-Type", "application/json")
-            .header("X-Opencode-Directory", &workspace_path)
-            .json(&serde_json::json!({ "title": "Chat Session" }))
-            .send()
-            .await
-            .map_err(|e| format!("Failed to create session: {}", e))?;
-
-        if !session_resp.status().is_success() {
-            let body = session_resp.text().await.unwrap_or_default();
-            return Err(format!("Failed to create session: {}", body));
-        }
-
-        let session_response: SessionCreateResponse = session_resp
-            .json()
-            .await
-            .map_err(|e| format!("Failed to parse session response: {}", e))?;
-
         Ok(Self {
-            client,
-            base_url,
-            auth_header,
-            session_id: session_response.id,
+            session_id: Arc::new(Mutex::new(None)),
             workspace_path,
-            server_process: Some(server_process),
+            native_tools_path,
+            opencode_binary,
         })
     }
 
     pub async fn send_message<F>(
         &self,
         message: &str,
-        provider_id: &str,
+        _provider_id: &str,
         model_id: &str,
         status_callback: F,
     ) -> Result<String, String>
     where
         F: Fn(StatusUpdate) + Send + 'static,
     {
-        // Start event subscription in background
-        let client = self.client.clone();
-        let base_url = self.base_url.clone();
-        let auth_header = self.auth_header.clone();
-        let session_id = self.session_id.clone();
+        // Build the command
+        let mut cmd = Command::new(&self.opencode_binary);
+        cmd.arg("run")
+            .arg("-m")
+            .arg(model_id)
+            .arg("--format")
+            .arg("json");
 
-        let event_handle = tokio::spawn(async move {
-            Self::subscribe_to_events(client, base_url, auth_header, session_id, status_callback).await;
-        });
-
-        // Send the prompt
-        let request = PromptRequest {
-            parts: vec![PromptPart {
-                part_type: "text".to_string(),
-                text: message.to_string(),
-            }],
-            model: ModelConfig {
-                provider_id: provider_id.to_string(),
-                model_id: model_id.to_string(),
-            },
-        };
-
-        let response = self
-            .client
-            .post(format!("{}/session/{}/message", self.base_url, self.session_id))
-            .header("Authorization", &self.auth_header)
-            .header("Content-Type", "application/json")
-            .header("X-Opencode-Directory", &self.workspace_path)
-            .json(&request)
-            .send()
-            .await
-            .map_err(|e| format!("Failed to send message: {}", e))?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(format!("API error ({}): {}", status, body));
-        }
-
-        let prompt_response: PromptResponse = response
-            .json()
-            .await
-            .map_err(|e| format!("Failed to parse response: {}", e))?;
-
-        // Cancel the event subscription
-        event_handle.abort();
-
-        // Extract text parts from the response
-        if let Some(parts) = prompt_response.parts {
-            let text_parts: Vec<String> = parts
-                .into_iter()
-                .filter(|p| p.part_type == "text")
-                .filter_map(|p| p.text)
-                .collect();
-
-            if text_parts.is_empty() {
-                Ok("No response received.".to_string())
-            } else {
-                Ok(text_parts.join("\n"))
-            }
-        } else {
-            Ok("No response received.".to_string())
-        }
-    }
-
-    async fn subscribe_to_events<F>(
-        client: Client,
-        base_url: String,
-        auth_header: String,
-        session_id: String,
-        status_callback: F,
-    ) where
-        F: Fn(StatusUpdate) + Send + 'static,
-    {
-        let response = match client
-            .get(format!("{}/event", base_url))
-            .header("Authorization", &auth_header)
-            .header("Accept", "text/event-stream")
-            .send()
-            .await
+        // Add session ID if we have one from a previous message
         {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("Failed to subscribe to events: {}", e);
-                return;
+            let session_guard = self.session_id.lock().unwrap();
+            if let Some(ref sid) = *session_guard {
+                cmd.arg("--session").arg(sid);
             }
-        };
+        }
 
-        let mut stream = response.bytes_stream();
-        use futures_util::StreamExt;
+        // Add the message
+        cmd.arg(message);
 
-        let mut buffer = String::new();
+        // Set up environment
+        let mut path_env = env::var("PATH").unwrap_or_default();
+        if self.native_tools_path.exists() {
+            path_env = format!("{}:{}", self.native_tools_path.display(), path_env);
+        }
 
-        while let Some(chunk) = stream.next().await {
-            match chunk {
-                Ok(bytes) => {
-                    buffer.push_str(&String::from_utf8_lossy(&bytes));
+        cmd.env("PATH", &path_env)
+            .env(
+                "PLAYWRIGHT_BROWSERS_PATH",
+                self.native_tools_path.join("playwright_browsers"),
+            )
+            .current_dir(&self.workspace_path)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
 
-                    // Process complete SSE messages
-                    while let Some(pos) = buffer.find("\n\n") {
-                        let message = buffer[..pos].to_string();
-                        buffer = buffer[pos + 2..].to_string();
+        // Spawn the process
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| format!("Failed to spawn opencode: {}", e))?;
 
-                        // Parse SSE message
-                        if let Some(data) = message.strip_prefix("data: ") {
-                            if let Ok(event) = serde_json::from_str::<Event>(data) {
-                                if let Some(status) =
-                                    Self::process_event(&event, &session_id)
-                                {
-                                    status_callback(status);
-                                }
-                            }
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| "Failed to capture stdout".to_string())?;
+
+        // Read and process output line by line
+        let reader = BufReader::new(stdout);
+        let mut response_text = String::new();
+        let session_id_clone = self.session_id.clone();
+
+        for line in reader.lines() {
+            let line = line.map_err(|e| format!("Failed to read line: {}", e))?;
+            if line.is_empty() {
+                continue;
+            }
+
+            // Parse the JSON event
+            let event: OpencodeEvent = match serde_json::from_str(&line) {
+                Ok(e) => e,
+                Err(_) => continue, // Skip malformed lines
+            };
+
+            // Capture session ID from first event
+            if let Some(ref sid) = event.session_id {
+                let mut session_guard = session_id_clone.lock().unwrap();
+                if session_guard.is_none() {
+                    *session_guard = Some(sid.clone());
+                }
+            }
+
+            // Process the event and send status updates
+            if let Some(status) = Self::process_event(&event) {
+                status_callback(status);
+            }
+
+            // Extract text from text events
+            if event.event_type == "text" {
+                if let Some(ref part) = event.part {
+                    if part.part_type == "text" {
+                        if let Some(ref text) = part.text {
+                            response_text = text.clone();
                         }
                     }
                 }
-                Err(e) => {
-                    eprintln!("Event stream error: {}", e);
-                    break;
-                }
             }
+        }
+
+        // Wait for the process to finish
+        let status = child
+            .wait()
+            .map_err(|e| format!("Failed to wait for opencode: {}", e))?;
+
+        if !status.success() {
+            return Err(format!("opencode exited with status: {}", status));
+        }
+
+        if response_text.is_empty() {
+            Ok("No response received.".to_string())
+        } else {
+            Ok(response_text)
         }
     }
 
-    fn process_event(event: &Event, session_id: &str) -> Option<StatusUpdate> {
-        let props = event.properties.as_ref()?;
-
+    fn process_event(event: &OpencodeEvent) -> Option<StatusUpdate> {
         match event.event_type.as_str() {
-            "session.status" => {
-                let event_session_id = props.session_id.as_ref()?;
-                if event_session_id != session_id {
-                    return None;
-                }
-
-                let status = props.status.as_ref()?;
-                let (update_type, message) = match status.status_type.as_str() {
-                    "busy" => ("busy", Some("Thinking...".to_string())),
-                    "idle" => ("idle", None),
-                    "retry" => ("retry", Some(format!("Retrying (attempt {})...", status.attempt.unwrap_or(1)))),
-                    _ => return None,
-                };
+            "step_start" => Some(StatusUpdate {
+                update_type: "busy".to_string(),
+                message: Some("Thinking...".to_string()),
+                details: Some(StatusUpdateDetails {
+                    timestamp: Self::now_millis(),
+                    ..Default::default()
+                }),
+            }),
+            "step_finish" => {
+                let reason = event
+                    .part
+                    .as_ref()
+                    .and_then(|p| p.reason.clone())
+                    .unwrap_or_default();
                 Some(StatusUpdate {
-                    update_type: update_type.to_string(),
-                    message,
+                    update_type: "idle".to_string(),
+                    message: Some(format!("Finished ({})", reason)),
                     details: Some(StatusUpdateDetails {
                         timestamp: Self::now_millis(),
                         ..Default::default()
                     }),
                 })
             }
-            "message.part.updated" => {
-                let part = props.part.as_ref()?;
-                let part_session_id = part.session_id.as_ref()?;
-                if part_session_id != session_id {
-                    return None;
-                }
+            "text" => Some(StatusUpdate {
+                update_type: "generating".to_string(),
+                message: Some("Generating response...".to_string()),
+                details: Some(StatusUpdateDetails {
+                    timestamp: Self::now_millis(),
+                    ..Default::default()
+                }),
+            }),
+            "tool_start" => {
+                let part = event.part.as_ref()?;
+                let tool_name = part.tool.as_ref()?;
+                let state = part.state.as_ref();
+                let title = state.and_then(|s| s.title.as_deref());
+                let description = Self::get_tool_description(tool_name, title);
+                let input = state.and_then(|s| s.input.clone());
+                let input_short = Self::format_tool_input_for_status(tool_name, &input);
+                let input_full = Self::format_tool_input_for_log(tool_name, &input);
 
-                match part.part_type.as_str() {
-                    "tool" => {
-                        let tool_name = part.tool.as_ref()?;
-                        let state = part.state.as_ref()?;
-                        let status_str = state.status.as_ref()?;
-
-                        match status_str.as_str() {
-                            "running" => {
-                                let description = Self::get_tool_description(tool_name, state.title.as_deref());
-                                let input_short = Self::format_tool_input_for_status(tool_name, &state.input);
-                                let input_full = Self::format_tool_input_for_log(tool_name, &state.input);
-
-                                let format_with_input = |desc: &str, input: &str| {
-                                    if input.is_empty() { desc.to_string() } else { format!("{}: {}", desc, input) }
-                                };
-
-                                Some(StatusUpdate {
-                                    update_type: "tool".to_string(),
-                                    message: Some(format_with_input(&description, &input_short)),
-                                    details: Some(StatusUpdateDetails {
-                                        full_message: Some(format_with_input(&description, &input_full)),
-                                        tool_name: Some(tool_name.clone()),
-                                        timestamp: Self::now_millis(),
-                                        input: state.input.clone(),
-                                        ..Default::default()
-                                    }),
-                                })
-                            }
-                            "completed" | "error" => {
-                                let duration = state.time.as_ref().and_then(|t| Some(t.end? - t.start?));
-                                let description = Self::get_tool_description(tool_name, state.title.as_deref());
-                                let is_error = status_str == "error";
-
-                                let (update_type, message) = if is_error {
-                                    ("tool-error", format!("Error: {}", state.error.as_deref().unwrap_or("Unknown error")))
-                                } else {
-                                    ("tool-completed", format!("{} completed", description))
-                                };
-
-                                Some(StatusUpdate {
-                                    update_type: update_type.to_string(),
-                                    message: Some(message),
-                                    details: Some(StatusUpdateDetails {
-                                        tool_name: Some(tool_name.clone()),
-                                        timestamp: Self::now_millis(),
-                                        output: if is_error { None } else { state.output.clone() },
-                                        error: if is_error { state.error.clone() } else { None },
-                                        duration,
-                                        ..Default::default()
-                                    }),
-                                })
-                            }
-                            _ => None,
-                        }
+                let format_with_input = |desc: &str, input_str: &str| {
+                    if input_str.is_empty() {
+                        desc.to_string()
+                    } else {
+                        format!("{}: {}", desc, input_str)
                     }
-                    "reasoning" | "text" => {
-                        let (update_type, message) = if part.part_type == "reasoning" {
-                            ("reasoning", "Reasoning...")
-                        } else {
-                            ("generating", "Generating response...")
-                        };
-                        Some(StatusUpdate {
-                            update_type: update_type.to_string(),
-                            message: Some(message.to_string()),
-                            details: Some(StatusUpdateDetails {
-                                timestamp: Self::now_millis(),
-                                ..Default::default()
-                            }),
-                        })
-                    }
-                    _ => None,
-                }
-            }
-            "session.idle" => {
-                if props.session_id.as_ref()? != session_id {
-                    return None;
-                }
+                };
+
                 Some(StatusUpdate {
-                    update_type: "idle".to_string(),
-                    message: None,
+                    update_type: "tool".to_string(),
+                    message: Some(format_with_input(&description, &input_short)),
                     details: Some(StatusUpdateDetails {
+                        full_message: Some(format_with_input(&description, &input_full)),
+                        tool_name: Some(tool_name.clone()),
                         timestamp: Self::now_millis(),
+                        input,
+                        ..Default::default()
+                    }),
+                })
+            }
+            "tool_finish" => {
+                let part = event.part.as_ref()?;
+                let tool_name = part.tool.as_ref()?;
+                let state = part.state.as_ref();
+                let title = state.and_then(|s| s.title.as_deref());
+                let description = Self::get_tool_description(tool_name, title);
+                let error = state.and_then(|s| s.error.clone());
+                let output = state.and_then(|s| s.output.clone());
+                let duration = state
+                    .and_then(|s| s.time.as_ref())
+                    .and_then(|t| Some(t.end? - t.start?));
+
+                let is_error = error.is_some();
+                let (update_type, message) = if is_error {
+                    (
+                        "tool-error",
+                        format!(
+                            "Error: {}",
+                            error.as_deref().unwrap_or("Unknown error")
+                        ),
+                    )
+                } else {
+                    ("tool-completed", format!("{} completed", description))
+                };
+
+                Some(StatusUpdate {
+                    update_type: update_type.to_string(),
+                    message: Some(message),
+                    details: Some(StatusUpdateDetails {
+                        tool_name: Some(tool_name.clone()),
+                        timestamp: Self::now_millis(),
+                        output: if is_error { None } else { output },
+                        error: if is_error { error } else { None },
+                        duration,
                         ..Default::default()
                     }),
                 })
@@ -632,14 +470,6 @@ impl OpencodeManager {
                 .map(|s| s.to_string())
                 .unwrap_or_default(),
             _ => String::new(),
-        }
-    }
-}
-
-impl Drop for OpencodeManager {
-    fn drop(&mut self) {
-        if let Some(mut process) = self.server_process.take() {
-            let _ = process.kill();
         }
     }
 }
