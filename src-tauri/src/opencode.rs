@@ -202,7 +202,7 @@ impl OpencodeManager {
             }
 
             line_count += 1;
-            eprintln!("[opencode] Line {}: {}", line_count, &line[..line.len().min(200)]);
+            eprintln!("[opencode] Line {}: {}", line_count, line);
 
             // Parse the JSON event
             let event: OpencodeEvent = match serde_json::from_str(&line) {
