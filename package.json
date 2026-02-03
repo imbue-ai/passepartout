@@ -1,7 +1,7 @@
 {
   "name": "passepartout",
   "productName": "Passepartout",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "A demo app for Latchkey",
   "type": "module",
   "private": true,
@@ -15,7 +15,7 @@
   "keywords": [],
   "author": {
     "name": "Qi Xiao",
-    "email": "me@xiaq.me"
+    "email": "qi@imbue.com"
   },
   "license": "MIT",
   "devDependencies": {
