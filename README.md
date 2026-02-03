@@ -5,6 +5,7 @@ Built as a demo app for [Latchkey](https://github.com/imbue-ai/latchkey).
 
 [Passepartout-demo.webm](https://github.com/user-attachments/assets/ed972b55-44bb-40bf-a3d2-5c32100c6506)
 
+You can find prebuilt apps in [Releases](https://github.com/imbue-ai/passepartout/releases).
 
 Why this demo app may be interesting to you:
 
@@ -13,6 +14,9 @@ Why this demo app may be interesting to you:
 
 - Thanks to Latchkey, Passepartout doesn't require an intermediary when making requests to third-party services;
   it makes HTTP requests directly to the API endpoints of such services.
+
+> [!WARNING]
+> Passepartout runs opencode with all permissions set to "allow" (aka "YOLO mode").
 
 ## External dependencies
 
