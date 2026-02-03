@@ -1,11 +1,13 @@
 use crate::credentials::CredentialManager;
 use crate::paths::AppPaths;
 use serde::{Deserialize, Serialize};
+use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use tauri::AppHandle;
+use tempfile::TempDir;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StatusUpdateDetails {
@@ -77,23 +79,60 @@ struct ToolTime {
 
 pub struct OpencodeManager {
     session_id: Arc<Mutex<Option<String>>>,
-    workspace_path: String,
     paths: AppPaths,
     opencode_binary: PathBuf,
+    /// Temporary workspace directory. When dropped, it is automatically removed.
+    temp_workspace_dir: TempDir,
 }
 
 impl OpencodeManager {
     pub async fn new(app: &AppHandle) -> Result<Self, String> {
         let paths = AppPaths::new(app)?;
         let opencode_binary = paths.get_binary_path("opencode");
-        let workspace_path = paths.opencode_workspace_path.to_string_lossy().to_string();
+        let source_workspace = &paths.opencode_workspace_path;
+
+        // Create a temporary directory for the workspace
+        let temp_workspace_dir = TempDir::new()
+            .map_err(|e| format!("Failed to create temporary directory: {}", e))?;
+
+        // Copy the source workspace contents directly into the temp directory
+        Self::copy_dir_contents(source_workspace, temp_workspace_dir.path())?;
+
+        eprintln!(
+            "[opencode] Created temporary workspace at: {:?}",
+            temp_workspace_dir.path()
+        );
 
         Ok(Self {
             session_id: Arc::new(Mutex::new(None)),
-            workspace_path,
             paths,
             opencode_binary,
+            temp_workspace_dir,
         })
+    }
+
+    /// Copy contents of a directory into another directory
+    fn copy_dir_contents(src: &PathBuf, dst: &std::path::Path) -> Result<(), String> {
+        let entries = fs::read_dir(src)
+            .map_err(|e| format!("Failed to read directory {:?}: {}", src, e))?;
+
+        for entry in entries {
+            let entry =
+                entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
+            let path = entry.path();
+            let dest_path = dst.join(entry.file_name());
+
+            if path.is_dir() {
+                fs::create_dir_all(&dest_path)
+                    .map_err(|e| format!("Failed to create directory {:?}: {}", dest_path, e))?;
+                Self::copy_dir_contents(&path, &dest_path)?;
+            } else {
+                fs::copy(&path, &dest_path)
+                    .map_err(|e| format!("Failed to copy {:?} to {:?}: {}", path, dest_path, e))?;
+            }
+        }
+
+        Ok(())
     }
 
     pub async fn send_message<F>(
@@ -140,14 +179,14 @@ impl OpencodeManager {
             "[opencode] Running: {:?} run -m {} --format json <message>",
             self.opencode_binary, full_model
         );
-        eprintln!("[opencode] Working directory: {}", self.workspace_path);
+        eprintln!("[opencode] Working directory: {:?}", self.temp_workspace_dir.path());
 
         cmd.env("PATH", &path_env)
             .env(
                 "PLAYWRIGHT_BROWSERS_PATH",
                 self.paths.get_playwright_browsers_path(),
             )
-            .current_dir(&self.workspace_path)
+            .current_dir(self.temp_workspace_dir.path())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
